@@ -1,0 +1,121 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // 인증된 사용자인지 확인하는 함수
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // 이미지 파일인지 확인하는 함수
+    function isImage() {
+      return request.resource.contentType.matches('image/.*');
+    }
+
+    // PDF 파일인지 확인하는 함수
+    function isPDF() {
+      return request.resource.contentType.matches('application/pdf');
+    }
+
+    // 파일 크기 제한 (10MB)
+    function isUnder10MB() {
+      return request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // 프로필 이미지 (파일명: {userId}.jpg) - 앱 내 모든 사용자가 볼 수 있도록 공개 읽기
+    match /profile_images/{imageFile} {
+      allow read: if true;
+      allow write: if isAuthenticated() &&
+                      imageFile == (request.auth.uid + '.jpg') &&
+                      isImage() &&
+                      isUnder10MB();
+    }
+
+    // 시설 신고 이미지
+    match /repair_images/{imageId} {
+      allow read: if true;
+      allow write: if isAuthenticated() &&
+                      isImage() &&
+                      isUnder10MB();
+    }
+
+    // 시설 신고 사진/영상 (복수 첨부)
+    match /repair_media/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // 공지사항 이미지
+    match /notice_images/{imageId} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // 공지사항 PDF (관리자 업로드 - contentType/크기 제한 없음)
+    match /notice_pdfs/{noticeId}/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    match /notices/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // 식단표 (관리자 업로드 - contentType/크기 제한 없음)
+    match /meals/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAuthenticated();
+    }
+
+    // 시설 신고 이미지 (실제 업로드 경로)
+    match /facilities/images/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() &&
+                      isImage() &&
+                      isUnder10MB();
+    }
+
+    // 게시판 게시글 이미지
+    match /board_posts/{userId}/{imageId} {
+      allow read: if true;
+      allow write: if isAuthenticated() &&
+                      request.auth.uid == userId &&
+                      isImage() &&
+                      isUnder10MB();
+    }
+
+    // 사생수칙 동의서 서명 이미지
+    match /regulation_agreements/{signatureFile} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       isImage() &&
+                       isUnder10MB();
+      // 서명은 생성 후 수정/삭제 불가 (법적 문서이므로)
+      allow update, delete: if false;
+    }
+
+    // 퇴사검사 동의서 서명 이미지
+    match /move_out_agreements/{signatureFile} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() &&
+                       isImage() &&
+                       isUnder10MB();
+      // 서명은 생성 후 수정/삭제 불가 (법적 문서이므로)
+      allow update, delete: if false;
+    }
+
+    // 앱 설정 이미지 (홈 배너 등) - 관리자만 쓰기, 인증 사용자 읽기
+    match /settings/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() &&
+                      isUnder10MB();
+    }
+
+    // 기본적으로 모든 접근 차단
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

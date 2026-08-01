@@ -1,0 +1,21 @@
+/// 층장 계정 이메일 → 담당 점검 구역 매핑
+const Map<String, String> kFloorCaptainAccounts = {
+  'a11@swu.ac.kr': '샬롬하우스 A동 1층',
+  'a12@swu.ac.kr': '샬롬하우스 A동 2층',
+  'a13@swu.ac.kr': '샬롬하우스 A동 3층',
+  'a14@swu.ac.kr': '샬롬하우스 A동 4층',
+  'a15@swu.ac.kr': '샬롬하우스 A동 5층',
+  'a16@swu.ac.kr': '샬롬하우스 A동 6층',
+  'a17@swu.ac.kr': '샬롬하우스 A동 7층',
+  'a18@swu.ac.kr': '샬롬하우스 B동 2층',
+  'a19@swu.ac.kr': '샬롬하우스 B동 3층',
+  'a20@swu.ac.kr': '샬롬하우스 B동 4층',
+  'a21@swu.ac.kr': '샬롬하우스 B동 5층',
+  'a22@swu.ac.kr': '샬롬하우스 B동 6층',
+  'a23@swu.ac.kr': '샬롬하우스 B동 7층',
+  'a24@swu.ac.kr': '국제생활관 A동 1층',
+  'a25@swu.ac.kr': '국제생활관 A동 2층',
+  'a26@swu.ac.kr': '국제생활관 B동 2층',
+  'a27@swu.ac.kr': '국제생활관 B동 3층',
+  'a28@swu.ac.kr': '바롬인성교육관 10층',
+};

@@ -1,0 +1,366 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'admin_m'];
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isOwner(userId) || isAdmin();
+      allow delete: if isOwner(userId) || isAdmin();
+
+      // 상벌점 이력 서브컬렉션 - 본인 및 관리자 읽기, 관리자 쓰기
+      match /point_history/{historyId} {
+        allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+        allow write: if isAdmin();
+      }
+    }
+
+    // 상벌점 이력 collectionGroup 쿼리 (관리자 앱 상벌 통계 페이지용)
+    // 위 /users/{userId}/point_history 규칙은 일반 서브컬렉션 조회에만 적용되고
+    // collectionGroup('point_history') 쿼리에는 별도 규칙이 필요하다.
+    match /{path=**}/point_history/{historyId} {
+      allow read: if isAdmin();
+    }
+
+    // Posts collection (Community)
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() ||
+                      isOwner(resource.data.authorId) ||
+                      // 좋아요
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likeCount'])) ||
+                      // 조회수 (계정당 1회: viewedUsers에 본인 uid 추가 + viewCount 증가만 허용)
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewedUsers'])) ||
+                      // 댓글수
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']));
+      allow delete: if isSignedIn() && resource.data.authorId == request.auth.uid;
+    }
+
+    // Board Posts collection (기숙사 게시판)
+    match /board_posts/{postId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() ||
+                      isOwner(resource.data.authorId) ||
+                      // 좋아요
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likeCount'])) ||
+                      // 조회수 (계정당 1회: viewedUsers에 본인 uid 추가 + viewCount 증가만 허용)
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewedUsers'])) ||
+                      // 댓글수
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    // Comments collection
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isOwner(resource.data.authorId);
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    // Board Comments collection (게시판 댓글)
+    match /board_comments/{commentId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      // 작성자만 댓글 수정 가능
+      allow update: if isOwner(resource.data.authorId);
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    // Notices collection
+    match /notices/{noticeId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin() ||
+                      (isSignedIn() &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewedUsers']));
+      allow delete: if isAdmin();
+    }
+
+    // Meals collection
+    match /meals/{mealId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Room Assignments collection
+    match /room_assignments/{assignmentId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Check In/Out Requests collection
+    match /check_in_out_requests/{requestId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() &&
+                      request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Facility Reports collection
+    match /facility_reports/{reportId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() &&
+                      request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin() ||
+                      (isSignedIn() && resource.data.userId == request.auth.uid && resource.data.status == 'pending');
+    }
+
+    // Repair Reports collection (시설 신고 - 현재 사용 중인 컬렉션)
+    match /repair_reports/{reportId} {
+      allow list: if isAdmin();
+      allow get: if isSignedIn() &&
+                    (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() &&
+                      request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Admin Sent Messages collection (관리자 메시지 발송 이력)
+    match /admin_sent_messages/{messageId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Events collection
+    match /events/{eventId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Facilities collection
+    match /facilities/{facilityId} {
+      allow read: if true;
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Cleaning Inspections collection
+    match /cleaning_inspections/{inspectionId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Cleaning Schedules collection (청소점검 스케줄)
+    match /cleaning_schedules/{scheduleId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      // 학생은 currentCount, status 필드만 업데이트 가능 (신청 시)
+      allow update: if isAdmin() ||
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentCount', 'status']));
+      allow delete: if isAdmin();
+    }
+
+    // Cleaning Requests collection
+    match /cleaning_requests/{requestId} {
+      allow read: if isSignedIn(); // 관리자 앱에서 전체 목록 조회 필요
+      // 본인 신청 또는 관리자/층장(admin_m)이 대리 신청하는 경우
+      allow create: if isSignedIn() &&
+                      (request.resource.data.userId == request.auth.uid || isAdmin());
+      // 작성자 또는 관리자만 상태 변경 가능
+      allow update: if isSignedIn() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin() ||
+                      (isSignedIn() && resource.data.userId == request.auth.uid && resource.data.status == 'pending');
+    }
+
+    // Overnight Requests collection (외박 신청)
+    match /overnight_requests/{requestId} {
+      allow get: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn();
+      allow create: if isSignedIn() &&
+                      request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() &&
+                      (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // User Notifications collection
+    match /user_notifications/{notificationId} {
+      allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow list: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // Attendance Events collection (출석체크 이벤트)
+    match /attendance_events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      // 학생 출석 시 attendeeCount만 업데이트 가능
+      allow update: if isAdmin() ||
+                      (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendeeCount']));
+      allow delete: if isAdmin();
+    }
+
+    // Attendance Records collection (출석 기록)
+    match /attendance_records/{recordId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      // 학생 본인의 QR 체크인 또는 관리자/층장이 부재·외박·외박미수정 상태를 기록으로 남기는 경우
+      allow create: if isSignedIn() &&
+                      (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Settings collection (앱 설정 - 배너 이미지 등)
+    match /settings/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Regulation Agreements collection (사생수칙 동의)
+    match /regulation_agreements/{agreementId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // Move Out Agreements collection (퇴사확인 동의)
+    match /move_out_agreements/{agreementId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // Monthly Plans collection (월간 계획)
+    match /monthly_plans/{planId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Floor Messages collection (학생 → 층장 쪽지)
+    match /floor_messages/{messageId} {
+      allow read: if isSignedIn() && (resource.data.senderId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.senderId == request.auth.uid);
+    }
+
+    // Floor Chat collection (층장단톡방 - 해당 층 학생 + 층장 공유 채팅)
+    match /floor_chats/{roomId} {
+      allow read: if isSignedIn();
+      // 학생도 메시지 전송 후 lastMessage/lastAt 메타 업데이트 가능
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        // 본인 uid로만 메시지 작성, readBy 업데이트도 허용
+        allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+        allow update: if isSignedIn() &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']);
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Sent Messages collection (층장·관리자 발송 이력)
+    match /sent_messages/{messageId} {
+      // admin_m(층장) 포함 관리자 전체 읽기
+      allow read: if isAdmin();
+      // 본인 uid로만 생성 (층장이 직접 발송한 경우)
+      allow create: if isSignedIn() && request.resource.data.senderUid == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Work Schedules collection (근무자 현황)
+    match /work_schedules/{scheduleId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Organization collection (조직도)
+    match /organization/{memberId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Checklist Submissions collection (관내점검표 제출)
+    match /checklist_submissions/{docId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isAdmin() && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin() && resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin() && resource.data.uid == request.auth.uid;
+    }
+
+    // Reports collection (신고)
+    match /reports/{reportId} {
+      allow read: if isAdmin();
+      allow create: if isSignedIn() && request.resource.data.reporterId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Intern Logs collection (인턴근무일지)
+    match /intern_logs/{logId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow create: if isAdmin() && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin() && resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin() && resource.data.uid == request.auth.uid;
+    }
+
+    // Intern Notices collection (인턴 공지사항 - 층장앱 홈에 표시)
+    match /intern_notices/{noticeId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}

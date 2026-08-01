@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "harness-marketplace": {
+      "source": {
+        "source": "directory",
+        "path": "./.claude/plugins/harness"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "harness@harness-marketplace": true
+  }
+}

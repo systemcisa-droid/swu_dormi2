@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dart --version:*)",
+      "Bash(flutter doctor:*)",
+      "Bash(ls -d \"C:\\\\Users\\\\bvector\\\\AppData\\\\Roaming\\\\Google\"\"* 2>&1 && ls -d \"C:UsersbvectorAppDataLocalGoogle\"\"*)",
+      "Bash(flutter create:*)",
+      "Bash(flutter build:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

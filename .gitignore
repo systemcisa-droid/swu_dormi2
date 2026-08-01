@@ -1,0 +1,55 @@
+# ── 백업/임시 폴더 (git에 올리지 않음) ──
+*_backup_*/
+_preserve_sem2_identity/
+
+# ── 민감 정보: 서명 키, 자격 증명 ──
+**/*.jks
+**/*.keystore
+**/key.properties
+**/google-services.json
+**/GoogleService-Info.plist
+**/firebase_options.dart
+**/firebase_options.dart.bak_*
+**/ios/Runner/GoogleService-Info.plist
+
+# ── Flutter/Dart 빌드 산출물 ──
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.pub-cache/
+**/.pub/
+**/doc/api/
+
+# ── 플랫폼별 캐시/ephemeral ──
+**/windows/flutter/ephemeral/
+**/linux/flutter/ephemeral/
+**/macos/Flutter/ephemeral/
+**/ios/Flutter/ephemeral/
+**/ios/Pods/
+**/.symlinks/
+**/android/.gradle/
+**/android/app/debug/
+**/android/app/profile/
+**/android/app/release/
+
+# ── IDE ──
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── 기타 ──
+*.log
+*.class
+*.pyc
+*.swp
