@@ -428,11 +428,6 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
               label: const Text('이벤트 생성'),
               onPressed: _showCreateEventDialog,
             ),
-            CommandBarButton(
-              icon: const Icon(FluentIcons.refresh),
-              label: const Text('새로고침'),
-              onPressed: _loadEvents,
-            ),
           ],
         ),
       ),
@@ -1094,16 +1089,6 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
           Button(
             child: const Text('엑셀 출력'),
             onPressed: _exportRecordsToExcel,
-          ),
-          const SizedBox(width: 8),
-          Button(
-            child: const Text('새로고침'),
-            onPressed: () {
-              if (_selectedEvent != null) {
-                _loadRecords(_selectedEvent!['_id']);
-                _loadEvents();
-              }
-            },
           ),
         ],
       ),

@@ -284,20 +284,6 @@ class _WindowsBoardScreenState extends State<WindowsBoardScreen> {
                               '게시판',
                               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                             ),
-                            const Spacer(),
-                            Tooltip(
-                              message: '새로고침',
-                              child: IconButton(
-                                icon: _isLoading
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: ProgressRing(strokeWidth: 2),
-                                      )
-                                    : const Icon(FluentIcons.refresh, size: 16),
-                                onPressed: _isLoading ? null : _loadPosts,
-                              ),
-                            ),
                           ],
                         ),
                         const SizedBox(height: 12),

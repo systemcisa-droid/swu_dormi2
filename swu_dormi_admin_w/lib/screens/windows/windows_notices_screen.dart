@@ -536,7 +536,30 @@ class _WindowsNoticesScreenState extends State<WindowsNoticesScreen> {
   Widget build(BuildContext context) {
     return ScaffoldPage(
       header: PageHeader(
-        title: const Text('공지사항 관리'),
+        title: Row(
+          children: [
+            const Text('공지사항 관리'),
+            const SizedBox(width: 16),
+            SizedBox(
+              width: 120,
+              child: ComboBox<String>(
+                value: _filterType,
+                items: const [
+                  ComboBoxItem(value: '전체', child: Text('전체')),
+                  ComboBoxItem(value: '고정', child: Text('고정')),
+                  ComboBoxItem(value: '일반', child: Text('일반')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() {
+                      _filterType = value;
+                    });
+                  }
+                },
+              ),
+            ),
+          ],
+        ),
         commandBar: CommandBar(
           mainAxisAlignment: MainAxisAlignment.end,
           primaryItems: [
@@ -562,33 +585,6 @@ class _WindowsNoticesScreenState extends State<WindowsNoticesScreen> {
                 ),
               ),
             ),
-            CommandBarBuilderItem(
-              wrappedItem: CommandBarButton(
-                icon: const Icon(FluentIcons.filter),
-                label: const Text('필터'),
-                onPressed: () {},
-              ),
-              builder: (context, mode, child) => ComboBox<String>(
-                value: _filterType,
-                items: const [
-                  ComboBoxItem(value: '전체', child: Text('전체')),
-                  ComboBoxItem(value: '고정', child: Text('고정')),
-                  ComboBoxItem(value: '일반', child: Text('일반')),
-                ],
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() {
-                      _filterType = value;
-                    });
-                  }
-                },
-              ),
-            ),
-            CommandBarButton(
-              icon: const Icon(FluentIcons.pop_expand),
-              label: const Text('팝업 공지 설정'),
-              onPressed: _showPopupNoticeDialog,
-            ),
             CommandBarButton(
               icon: const Icon(FluentIcons.add),
               label: const Text('새 공지사항'),
@@ -602,11 +598,9 @@ class _WindowsNoticesScreenState extends State<WindowsNoticesScreen> {
               },
             ),
             CommandBarButton(
-              icon: const Icon(FluentIcons.refresh),
-              label: const Text('새로고침'),
-              onPressed: () {
-                setState(() {});
-              },
+              icon: const Icon(FluentIcons.pop_expand),
+              label: const Text('팝업 공지 설정'),
+              onPressed: _showPopupNoticeDialog,
             ),
           ],
         ),

@@ -9,9 +9,9 @@ You are a Flutter/Dart developer for **swu_dormi_admin_m** — a narrow, **floor
 
 ## 프로젝트 컨텍스트
 - 앱명: 샬롬하우스 층장(floor captain) 앱
-- Android 패키지: `com.swu.dormi.admin.m2`, pubspec 이름 `swu_dormi_admin_m2` — 그러나 Dart import는 `package:swu_dormi_admin/...`을 사용 (레거시 카피 흔적, 신규 파일도 이 관례 유지)
-- `main.dart`의 실제 nav shell은 **cleaning, attendance, profile 3개만 연결**되어 있다 — `facilities`, `students`, `message`, `dashboard` 화면은 존재하지만 미연결 상태. 연결 요청이 없으면 임의로 nav에 추가하지 말 것.
-- `check_in_out/`, `overnight/` 폴더는 모델만 있고 화면 미구현
+- 2026-08 기준으로 1학기 코드베이스를 통째로 이식받은 상태 — Android 패키지/pubspec 이름은 실제 파일을 확인해서 판단할 것 (이전 세대와 다를 수 있음)
+- `main.dart`는 `Drawer` 기반 nav shell(`_currentIndex`, `_screens[_currentIndex]`)로 구성되어 있고, home/facilities/cleaning/attendance/message/profile/students/checklist/intern_log 등 **다수 화면이 실제로 연결되어 있다** (과거 "3개만 연결" 상태에서 확장됨) — 새 화면 연결 여부는 매번 `main.dart`를 직접 읽어 확인할 것, 이 문서의 서술을 과거 스냅샷으로 신뢰하지 말 것
+- `check_in_out/`, `overnight/` 폴더는 모델만 있고 화면 미구현일 수 있음 — 역시 직접 확인
 
 ## 상태관리
 `provider` 의존성은 있으나 미사용. `StatefulWidget` + `setState` 패턴을 따른다. cleaning/attendance 화면은 서비스 레이어를 거치지 않고 Firestore를 직접 호출하는 경우가 많다 — 기존 파일 패턴을 먼저 확인하고 일관성을 맞출 것.

@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.swu.dormi.admin.m2"
+    namespace = "com.swu.dormi.admin.m"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -22,7 +22,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.swu.dormi.admin.m2"
+        applicationId = "com.swu.dormi.admin.m"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

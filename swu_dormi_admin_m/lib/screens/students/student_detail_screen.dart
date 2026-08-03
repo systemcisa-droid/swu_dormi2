@@ -1,264 +1,192 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../../models/student_model.dart';
-import '../../services/firestore_service.dart';
 
 class StudentDetailScreen extends StatefulWidget {
   final StudentModel student;
 
-  const StudentDetailScreen({
-    super.key,
-    required this.student,
-  });
+  const StudentDetailScreen({super.key, required this.student});
 
   @override
   State<StudentDetailScreen> createState() => _StudentDetailScreenState();
 }
 
 class _StudentDetailScreenState extends State<StudentDetailScreen> {
-  final _formKey = GlobalKey<FormState>();
-  late TextEditingController _roomNumberController;
-  late TextEditingController _phoneNumberController;
-  bool _isEditing = false;
-  bool _isLoading = false;
+  final _firestore = FirebaseFirestore.instance;
+  final _dateFormat = DateFormat('yyyy.MM.dd HH:mm');
+
+  // 동의 서명
+  Map<String, dynamic>? _regulationAgreement;
+  Map<String, dynamic>? _moveOutAgreement;
+  bool _isLoadingAgreements = true;
+
+  static const _moveOutStatusOptions = ['만기퇴사', '자진퇴사', '강제퇴사', '영구퇴사'];
+  static bool _isMoveOutStatus(String status) => status == '퇴사' || _moveOutStatusOptions.contains(status);
+
+  static Color _statusColor(String status) {
+    if (status == '바롬인성교육관') return Colors.orange.shade800;
+    if (_isMoveOutStatus(status)) return Colors.red.shade700;
+    return Colors.green.shade700;
+  }
 
   @override
   void initState() {
     super.initState();
-    _roomNumberController = TextEditingController(text: widget.student.roomNumber);
-    _phoneNumberController = TextEditingController(text: widget.student.phoneNumber);
+    _loadAgreements();
   }
 
-  @override
-  void dispose() {
-    _roomNumberController.dispose();
-    _phoneNumberController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _updateStudent() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
+  Future<void> _loadAgreements() async {
+    setState(() => _isLoadingAgreements = true);
     try {
-      await FirestoreService().updateStudent(
-        widget.student.id,
-        {
-          'roomNumber': _roomNumberController.text.trim(),
-          'phoneNumber': _phoneNumberController.text.trim(),
-        },
-      );
-
-      if (mounted) {
-        setState(() {
-          _isEditing = false;
-          _isLoading = false;
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('학생 정보가 수정되었습니다'),
-            backgroundColor: Colors.green,
-          ),
-        );
-
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('오류가 발생했습니다: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      final regDoc = await _firestore.collection('regulation_agreements').doc(widget.student.id).get();
+      final moveDoc = await _firestore.collection('move_out_agreements').doc(widget.student.id).get();
+      if (!mounted) return;
+      setState(() {
+        _regulationAgreement = regDoc.exists ? regDoc.data() : null;
+        _moveOutAgreement = moveDoc.exists ? moveDoc.data() : null;
+        _isLoadingAgreements = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoadingAgreements = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final student = widget.student;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('학생 정보'),
+        title: Text(student.name),
         backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
-        actions: [
-          if (!_isEditing)
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () {
-                setState(() => _isEditing = true);
-              },
-            ),
-        ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            children: [
-              // 프로필 이미지
-              CircleAvatar(
-                radius: 60,
-                backgroundColor: Theme.of(context).colorScheme.primary.withOpacity(0.1),
-                backgroundImage: widget.student.profileImageUrl != null
-                    ? NetworkImage(widget.student.profileImageUrl!)
-                    : null,
-                child: widget.student.profileImageUrl == null
-                    ? Icon(
-                        Icons.person,
-                        size: 64,
-                        color: Theme.of(context).colorScheme.primary,
-                      )
-                    : null,
-              ),
-              const SizedBox(height: 24),
-
-              // 이름
-              Text(
-                widget.student.name,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-              const SizedBox(height: 8),
-
-              // 학번
-              Text(
-                widget.student.studentId,
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey.shade600,
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            // ── 프로필 헤더 ──
+            Row(
+              children: [
+                CircleAvatar(
+                  radius: 36,
+                  backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                  backgroundImage: student.profileImageUrl != null
+                      ? NetworkImage(student.profileImageUrl!)
+                      : null,
+                  child: student.profileImageUrl == null
+                      ? Icon(Icons.person, size: 38, color: Theme.of(context).colorScheme.primary)
+                      : null,
                 ),
-              ),
-              const SizedBox(height: 32),
-
-              // 정보 섹션
-              _buildInfoSection(
-                title: '기본 정보',
-                children: [
-                  _buildInfoRow(
-                    icon: Icons.email,
-                    label: '이메일',
-                    value: widget.student.email,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(student.name,
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                      if (student.nickname != null)
+                        Text('별명: ${student.nickname}',
+                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                      Text(student.studentId,
+                          style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  _isEditing
-                      ? _buildEditableField(
-                          icon: Icons.phone,
-                          label: '전화번호',
-                          controller: _phoneNumberController,
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return '전화번호를 입력해주세요';
-                            }
-                            return null;
-                          },
-                        )
-                      : _buildInfoRow(
-                          icon: Icons.phone,
-                          label: '전화번호',
-                          value: widget.student.phoneNumber,
-                        ),
-                  const SizedBox(height: 16),
-                  _buildInfoRow(
-                    icon: Icons.calendar_today,
-                    label: '가입일',
-                    value: DateFormat('yyyy년 MM월 dd일').format(widget.student.createdAt),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-
-              // 방 정보
-              _buildInfoSection(
-                title: '방 정보',
-                children: [
-                  _isEditing
-                      ? _buildEditableField(
-                          icon: Icons.door_front_door,
-                          label: '방 번호',
-                          controller: _roomNumberController,
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return '방 번호를 입력해주세요';
-                            }
-                            return null;
-                          },
-                        )
-                      : _buildInfoRow(
-                          icon: Icons.door_front_door,
-                          label: '방 번호',
-                          value: widget.student.roomCapacity.isNotEmpty ? '${widget.student.roomNumber}호 (${widget.student.roomCapacity})' : '${widget.student.roomNumber}호',
-                        ),
-                ],
-              ),
-              const SizedBox(height: 32),
-
-              // 수정/취소 버튼
-              if (_isEditing) ...[
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: _isLoading
-                            ? null
-                            : () {
-                                setState(() {
-                                  _isEditing = false;
-                                  _roomNumberController.text = widget.student.roomNumber;
-                                  _phoneNumberController.text = widget.student.phoneNumber;
-                                });
-                              },
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                        ),
-                        child: const Text('취소'),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: _isLoading ? null : _updateStudent,
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          backgroundColor: Theme.of(context).colorScheme.primary,
-                          foregroundColor: Colors.white,
-                        ),
-                        child: _isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text('저장'),
-                      ),
-                    ),
-                  ],
                 ),
               ],
+            ),
+            const SizedBox(height: 20),
+
+            // ── 기본 정보 ──
+            _sectionCard(
+              title: '기본 정보',
+              child: Column(
+                children: [
+                  _infoRow('건물', student.dormBuilding ?? '-'),
+                  _divider(),
+                  _infoRow('호실', student.roomCapacity.isNotEmpty ? '${student.roomNumber}호 (${student.roomCapacity})' : '${student.roomNumber}호'),
+                  if (student.seatNumber != null && student.seatNumber!.isNotEmpty) ...[
+                    _divider(),
+                    _infoRow('자리번호', student.seatNumber!),
+                  ],
+                  _divider(),
+                  _infoRow('학번', student.studentId),
+                  _divider(),
+                  _infoRow('이메일', student.email),
+                  _divider(),
+                  _infoRow('학과', (student.department != null && student.department!.isNotEmpty) ? student.department! : '-'),
+                  _divider(),
+                  _infoRow('가입일', DateFormat('yyyy년 MM월 dd일').format(student.createdAt)),
+                  _divider(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 80,
+                          child: Text(
+                            '학생상태',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: _statusColor(student.residentStatus.isEmpty ? '재실중' : student.residentStatus).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: _statusColor(student.residentStatus.isEmpty ? '재실중' : student.residentStatus).withValues(alpha: 0.4),
+                              ),
+                            ),
+                            child: Text(
+                              student.residentStatus.isEmpty ? '재실중' : student.residentStatus,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: _statusColor(student.residentStatus.isEmpty ? '재실중' : student.residentStatus),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── 서명 ──
+            if (_isLoadingAgreements)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              )
+            else ...[
+              _agreementCard('사행수칙 동의 서명', _regulationAgreement),
+              const SizedBox(height: 12),
+              _agreementCard('퇴사확인 서명', _moveOutAgreement),
             ],
-          ),
+            const SizedBox(height: 20),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildInfoSection({
-    required String title,
-    required List<Widget> children,
-  }) {
+  Widget _sectionCard({required String title, required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
         borderRadius: BorderRadius.circular(12),
@@ -267,94 +195,102 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 4, height: 16,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+            ],
           ),
-          const SizedBox(height: 16),
-          ...children,
+          const SizedBox(height: 14),
+          child,
         ],
       ),
     );
   }
 
-  Widget _buildInfoRow({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: Colors.grey.shade600),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(label,
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
           ),
-        ),
-      ],
+          Expanded(
+              child: Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500))),
+        ],
+      ),
     );
   }
 
-  Widget _buildEditableField({
-    required IconData icon,
-    required String label,
-    required TextEditingController controller,
-    required String? Function(String?) validator,
-  }) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: Colors.grey.shade600),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _divider() => Divider(height: 1, color: Colors.grey.shade200);
+
+  Widget _agreementCard(String title, Map<String, dynamic>? data) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey.shade600,
-                ),
+              Container(
+                width: 4, height: 16,
+                decoration: BoxDecoration(color: Colors.teal, borderRadius: BorderRadius.circular(2)),
               ),
-              const SizedBox(height: 4),
-              TextFormField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                ),
-                validator: validator,
-              ),
+              const SizedBox(width: 8),
+              Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
             ],
           ),
-        ),
-      ],
+          const SizedBox(height: 12),
+          if (data == null)
+            Text('미동의', style: TextStyle(fontSize: 13, color: Colors.grey.shade500))
+          else ...[
+            _infoRow('이름', data['userName'] ?? '-'),
+            _divider(),
+            _infoRow(
+              '동의일시',
+              data['agreedAt'] != null
+                  ? _dateFormat.format((data['agreedAt'] as Timestamp).toDate())
+                  : '-',
+            ),
+            const SizedBox(height: 12),
+            const Text('서명', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+            const SizedBox(height: 8),
+            if (data['signatureUrl'] != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Container(
+                  width: double.infinity,
+                  height: 120,
+                  color: Colors.white,
+                  child: Image.network(
+                    data['signatureUrl'],
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) =>
+                        Center(child: Text('이미지 로드 실패', style: TextStyle(color: Colors.grey.shade500))),
+                  ),
+                ),
+              )
+            else
+              Text('서명 없음', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+          ],
+        ],
+      ),
     );
   }
 }

@@ -92,18 +92,18 @@ class FirestoreService {
       print('현재 로그인 사용자 UID: ${currentUser?.uid}');
       print('현재 로그인 사용자 Email: ${currentUser?.email}');
 
-      String? adminName;
+      String? adminEmail = currentUser?.email;
 
       if (currentUser != null) {
-        // 관리자 이름 가져오기
+        // 관리자 이메일 가져오기
         print('관리자 정보 조회 중...');
         final adminDoc = await users.doc(currentUser.uid).get();
         print('관리자 문서 존재 여부: ${adminDoc.exists}');
 
         if (adminDoc.exists) {
           final adminData = adminDoc.data() as Map<String, dynamic>;
-          adminName = adminData['name'] ?? adminData['email'];
-          print('조회된 관리자 이름: $adminName');
+          adminEmail = adminData['email'] ?? currentUser.email;
+          print('조회된 관리자 이메일: $adminEmail');
         } else {
           print('⚠️ 관리자 문서를 찾을 수 없음!');
         }
@@ -116,7 +116,8 @@ class FirestoreService {
         'technicianNote': technicianNote,
         'processedAt': FieldValue.serverTimestamp(),
         'processedBy': currentUser?.uid,
-        'processedByName': adminName ?? '관리자',
+        'processedByEmail': currentUser?.email,
+        'processedByName': adminEmail ?? '관리자',
       };
 
       if (status == 'completed') {
@@ -166,9 +167,8 @@ class FirestoreService {
     return meals.orderBy('createdAt', descending: true).snapshots();
   }
 
-  // 학생 관리
   Stream<QuerySnapshot> getStudents() {
-    return users.where('role', isEqualTo: 'student').orderBy('name').snapshots();
+    return users.where('role', isEqualTo: 'student').snapshots();
   }
 
   Future<void> updateStudent(String userId, Map<String, dynamic> userData) async {
@@ -176,6 +176,23 @@ class FirestoreService {
       await users.doc(userId).update(userData);
     } catch (e) {
       throw Exception('학생 정보 수정 중 오류가 발생했습니다: $e');
+    }
+  }
+
+  Future<void> deleteStudent(String userId) async {
+    try {
+      final userDoc = await users.doc(userId).get();
+      final userData = userDoc.data() as Map<String, dynamic>?;
+      final studentId = userData?['studentId'] as String?;
+
+      final batch = _firestore.batch();
+      batch.delete(users.doc(userId));
+      if (studentId != null && studentId.isNotEmpty) {
+        batch.delete(_firestore.collection('student_ids').doc(studentId));
+      }
+      await batch.commit();
+    } catch (e) {
+      throw Exception('회원탈퇴 처리 중 오류가 발생했습니다: $e');
     }
   }
 

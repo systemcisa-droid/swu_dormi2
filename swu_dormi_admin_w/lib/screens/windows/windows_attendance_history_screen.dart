@@ -385,8 +385,6 @@ class _WindowsAttendanceHistoryScreenState
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          IconButton(icon: const Icon(FluentIcons.refresh, size: 14), onPressed: _loadData),
         ],
       ),
     );

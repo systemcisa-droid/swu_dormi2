@@ -40,14 +40,6 @@ class _WindowsDashboardState extends State<WindowsDashboard> {
     _loadTodaySchedules();
   }
 
-  Future<void> _refreshStatistics() async {
-    setState(() {
-      _statisticsFuture = _firestoreService.getStatistics();
-    });
-    await _loadActiveAttendanceEvents();
-    await _loadTodaySchedules();
-  }
-
   Future<void> _loadTodaySchedules() async {
     try {
       final today = DateTime.now();
@@ -309,11 +301,6 @@ class _WindowsDashboardState extends State<WindowsDashboard> {
                   style: FluentTheme.of(context).typography.subtitle?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
-                IconButton(
-                  icon: const Icon(FluentIcons.refresh, size: 16),
-                  onPressed: _refreshStatistics,
-                ),
-                const SizedBox(width: 12),
                 Text(
                   _dateFormat.format(DateTime.now()),
                   style: TextStyle(fontSize: 13, color: Colors.grey[120]),

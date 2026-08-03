@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/auth_service.dart';
-import '../../constants/floor_captain_accounts.dart';
+import 'notification_settings_screen.dart';
+import 'privacy_policy_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,7 +20,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = true;
 
   static const List<String> _floorOptions = [
-    '샬롬하우스 A동 1층',
     '샬롬하우스 A동 2층',
     '샬롬하우스 A동 3층',
     '샬롬하우스 A동 4층',
@@ -37,6 +37,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     '국제생활관 B동 2층',
     '국제생활관 B동 3층',
     '바롬인성교육관 10층',
+    '샬롬하우스(겨울방학) A동 5층',
+    '샬롬하우스(겨울방학) A동 6층',
+    '샬롬하우스(겨울방학) A동 7층',
+  ];
+
+  static const List<String> _dormBuildingOptions = [
+    '샬롬하우스',
+    '국제생활관',
+    '바롬인성교육관',
+    '샬롬하우스(겨울방학)',
   ];
 
   @override
@@ -200,6 +210,234 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  void _showEditProfileDialog({
+    required String currentName,
+    required String currentStudentId,
+    required String currentDepartment,
+  }) {
+    final nameCtrl = TextEditingController(text: currentName);
+    final studentIdCtrl = TextEditingController(text: currentStudentId);
+    final departmentCtrl = TextEditingController(text: currentDepartment);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('프로필 수정'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: '이름',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: studentIdCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: '학번',
+                  prefixIcon: Icon(Icons.badge_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: departmentCtrl,
+                decoration: const InputDecoration(
+                  labelText: '학과',
+                  prefixIcon: Icon(Icons.history_edu_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Icon(Icons.lock_outline, size: 16, color: Colors.grey),
+                  const SizedBox(width: 6),
+                  Text(
+                    '이메일은 변경할 수 없습니다',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final name = nameCtrl.text.trim();
+              final studentId = studentIdCtrl.text.trim();
+              final department = departmentCtrl.text.trim();
+              if (name.isEmpty) return;
+              Navigator.pop(ctx);
+              _saveProfileData(
+                name: name,
+                studentId: studentId,
+                department: department,
+              );
+            },
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveProfileData({
+    required String name,
+    required String studentId,
+    required String department,
+  }) async {
+    final uid = _authService.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await _firestore.collection('users').doc(uid).update({
+        'name': name,
+        'studentId': studentId,
+        'department': department,
+      });
+      setState(() {
+        _adminData = {
+          ...?_adminData,
+          'name': name,
+          'studentId': studentId,
+          'department': department,
+        };
+      });
+      _showSnack('프로필 정보가 변경되었습니다', Colors.green);
+    } catch (_) {
+      _showSnack('저장에 실패했습니다', Colors.red);
+    }
+  }
+
+  void _showEditContactDialog() {
+    final phoneCtrl = TextEditingController(
+        text: _adminData?['phone'] as String? ?? '');
+    String? selectedBuilding = _adminData?['dormBuilding'] as String?;
+    if (selectedBuilding != null &&
+        !_dormBuildingOptions.contains(selectedBuilding)) {
+      selectedBuilding = null;
+    }
+    final roomCtrl = TextEditingController(
+        text: _adminData?['roomNumber'] as String? ?? '');
+    final seatCtrl = TextEditingController(
+        text: _adminData?['seatNumber'] as String? ?? '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('기숙사 정보 편집'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: '전화번호',
+                    prefixIcon: Icon(Icons.phone_outlined),
+                    hintText: '010-0000-0000',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedBuilding,
+                  decoration: const InputDecoration(
+                    labelText: '기숙사 건물',
+                    prefixIcon: Icon(Icons.apartment_outlined),
+                  ),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('선택 안함')),
+                    ..._dormBuildingOptions.map((b) =>
+                        DropdownMenuItem(value: b, child: Text(b))),
+                  ],
+                  onChanged: (v) => setDialogState(() => selectedBuilding = v),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: roomCtrl,
+                  keyboardType: TextInputType.text,
+                  decoration: const InputDecoration(
+                    labelText: '호실',
+                    prefixIcon: Icon(Icons.door_front_door_outlined),
+                    hintText: '예) 301',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: seatCtrl,
+                  keyboardType: TextInputType.text,
+                  decoration: const InputDecoration(
+                    labelText: '자리번호',
+                    prefixIcon: Icon(Icons.event_seat_outlined),
+                    hintText: '예) A',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _saveContactInfo(
+                  phone: phoneCtrl.text.trim(),
+                  dormBuilding: selectedBuilding,
+                  roomNumber: roomCtrl.text.trim(),
+                  seatNumber: seatCtrl.text.trim(),
+                );
+              },
+              child: const Text('저장'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveContactInfo({
+    required String phone,
+    required String? dormBuilding,
+    required String roomNumber,
+    required String seatNumber,
+  }) async {
+    final uid = _authService.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await _firestore.collection('users').doc(uid).update({
+        'phone': phone,
+        'dormBuilding': dormBuilding,
+        'roomNumber': roomNumber,
+        'seatNumber': seatNumber,
+      });
+      setState(() {
+        _adminData = {
+          ...?_adminData,
+          'phone': phone,
+          'dormBuilding': dormBuilding,
+          'roomNumber': roomNumber,
+          'seatNumber': seatNumber,
+        };
+      });
+      _showSnack('기숙사 정보가 저장되었습니다', Colors.green);
+    } catch (_) {
+      _showSnack('저장에 실패했습니다', Colors.red);
+    }
+  }
+
   void _showSnack(String msg, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -220,6 +458,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ? DateTime.tryParse(createdAtRaw)
             : null;
     final assignedFloor = _adminData?['assignedFloor'] as String?;
+    final phone = _adminData?['phone'] as String?;
+    final dormBuilding = _adminData?['dormBuilding'] as String?;
+    final roomNumber = _adminData?['roomNumber'] as String?;
+    final seatNumber = _adminData?['seatNumber'] as String?;
+    final studentId = _adminData?['studentId'] as String? ?? '';
+    final department = _adminData?['department'] as String? ?? '';
 
     return Scaffold(
       body: _isLoading
@@ -281,9 +525,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     // 계정 정보
                     _buildSection(
                       title: '계정 정보',
+                      trailing: IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        onPressed: () => _showEditProfileDialog(
+                          currentName: name,
+                          currentStudentId: studentId,
+                          currentDepartment: department,
+                        ),
+                        tooltip: '편집',
+                      ),
                       children: [
                         _buildInfoTile(Icons.person_outline, '이름', name),
                         _buildInfoTile(Icons.email_outlined, '이메일', email),
+                        _buildInfoTile(
+                          Icons.badge_outlined,
+                          '학번',
+                          studentId.isNotEmpty ? studentId : '-',
+                        ),
+                        _buildInfoTile(
+                          Icons.history_edu_outlined,
+                          '학과',
+                          department.isNotEmpty ? department : '-',
+                        ),
+
                         _buildInfoTile(Icons.admin_panel_settings_outlined, '권한',
                             role == 'admin' ? '층장' : role),
                         if (createdAt != null)
@@ -297,6 +561,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                     const SizedBox(height: 8),
 
+                    // 기숙사 정보
+                    _buildSection(
+                      title: '기숙사 정보',
+                      trailing: IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        onPressed: _showEditContactDialog,
+                        tooltip: '편집',
+                      ),
+                      children: [
+                        _buildInfoTile(
+                          Icons.phone_outlined,
+                          '전화번호',
+                          phone?.isNotEmpty == true ? phone! : '-',
+                        ),
+                        _buildInfoTile(
+                          Icons.apartment_outlined,
+                          '기숙사 건물',
+                          dormBuilding?.isNotEmpty == true ? dormBuilding! : '-',
+                        ),
+                        _buildInfoTile(
+                          Icons.door_front_door_outlined,
+                          '호실',
+                          roomNumber?.isNotEmpty == true ? roomNumber! : '-',
+                        ),
+                        _buildInfoTile(
+                          Icons.event_seat_outlined,
+                          '자리번호',
+                          seatNumber?.isNotEmpty == true ? seatNumber! : '-',
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
                     // 담당 점검 구역
                     _buildSection(
                       title: '담당 점검 구역',
@@ -304,43 +602,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         Padding(
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
-                          child: kFloorCaptainAccounts.containsKey(email)
-                              ? Row(
-                                  children: [
-                                    Icon(Icons.layers,
-                                        color: Theme.of(context).primaryColor),
-                                    const SizedBox(width: 12),
-                                    Text(
-                                      assignedFloor ?? '미지정',
-                                      style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    Icon(Icons.lock_outline,
-                                        size: 16,
-                                        color: Colors.grey.shade400),
-                                  ],
-                                )
-                              : DropdownButtonFormField<String>(
-                                  key: ValueKey(assignedFloor),
-                                  initialValue:
-                                      _floorOptions.contains(assignedFloor)
-                                          ? assignedFloor
-                                          : null,
-                                  decoration: const InputDecoration(
-                                    prefixIcon: Icon(Icons.layers_outlined),
-                                  ),
-                                  items: [
-                                    const DropdownMenuItem(
-                                        value: null, child: Text('미지정')),
-                                    ..._floorOptions.map((f) =>
-                                        DropdownMenuItem(
-                                            value: f, child: Text(f))),
-                                  ],
-                                  onChanged: _saveAssignedFloor,
-                                ),
+                          child: DropdownButtonFormField<String>(
+                            key: ValueKey(assignedFloor),
+                            initialValue: _floorOptions.contains(assignedFloor)
+                                ? assignedFloor
+                                : null,
+                            decoration: const InputDecoration(
+                              prefixIcon: Icon(Icons.layers_outlined),
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                  value: null, child: Text('미지정')),
+                              ..._floorOptions.map((f) =>
+                                  DropdownMenuItem(value: f, child: Text(f))),
+                            ],
+                            onChanged: _saveAssignedFloor,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // 알림 설정
+                    _buildSection(
+                      title: '알림 설정',
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.notifications_outlined),
+                          title: const Text('알림 설정'),
+                          trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const NotificationSettingsScreen()),
+                          ),
                         ),
                       ],
                     ),
@@ -357,6 +653,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           trailing: const Icon(Icons.chevron_right,
                               color: Colors.grey),
                           onTap: _showChangePasswordDialog,
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 8),
+
+                    // 약관 및 정책
+                    _buildSection(
+                      title: '약관 및 정책',
+                      children: [
+                        ListTile(
+                          leading: const Icon(Icons.privacy_tip_outlined),
+                          title: const Text('개인정보 처리방침 및 회원탈퇴'),
+                          trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+                          ),
                         ),
                       ],
                     ),
@@ -389,21 +703,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSection(
-      {required String title, required List<Widget> children}) {
+  Widget _buildSection({
+    required String title,
+    required List<Widget> children,
+    Widget? trailing,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: Text(
-            title,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: Colors.grey.shade500,
-              letterSpacing: 0.5,
-            ),
+          child: Row(
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey.shade500,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              if (trailing != null) ...[
+                const Spacer(),
+                trailing,
+              ],
+            ],
           ),
         ),
         Card(

@@ -314,7 +314,16 @@ class FirestoreService {
 
   Future<void> deleteStudent(String userId) async {
     try {
-      await users.doc(userId).delete();
+      final userDoc = await users.doc(userId).get();
+      final userData = userDoc.data() as Map<String, dynamic>?;
+      final studentId = userData?['studentId'] as String?;
+
+      final batch = FirebaseFirestore.instance.batch();
+      batch.delete(users.doc(userId));
+      if (studentId != null && studentId.isNotEmpty) {
+        batch.delete(FirebaseFirestore.instance.collection('student_ids').doc(studentId));
+      }
+      await batch.commit();
     } catch (e) {
       throw Exception('회원탈퇴 처리 중 오류가 발생했습니다: $e');
     }

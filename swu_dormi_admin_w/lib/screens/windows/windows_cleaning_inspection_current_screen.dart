@@ -141,7 +141,7 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
 
   /// 스케줄의 floor 문자열에서 건물명 추출 (예: "국제생활관 A동 2층" → "국제생활관")
   static String? _extractBuildingFromFloor(String floor) {
-    if (floor.startsWith('샬롬하우스(여름방학)')) return '샬롬하우스(여름방학)';
+    if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
@@ -236,14 +236,6 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
                             Text('추가'),
                           ],
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        icon: const Icon(FluentIcons.refresh, size: 14),
-                        onPressed: () {
-                          _loadSchedules();
-                          _loadRequests();
-                        },
                       ),
                     ],
                   ),
@@ -1308,8 +1300,8 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
       final inspType = scheduleData['inspectionType'] as String? ?? widget.fixedType;
       final floorStr = scheduleData['floor']?.toString() ?? '';
       final String? scheduleBuilding;
-      if (floorStr.startsWith('샬롬하우스(여름방학)')) {
-        scheduleBuilding = '샬롬하우스(여름방학)';
+      if (floorStr.startsWith('샬롬하우스(겨울방학)')) {
+        scheduleBuilding = '샬롬하우스(겨울방학)';
       } else if (floorStr.startsWith('샬롬하우스')) {
         scheduleBuilding = '샬롬하우스';
       } else if (floorStr.startsWith('국제생활관')) {

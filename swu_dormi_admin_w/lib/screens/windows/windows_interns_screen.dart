@@ -136,16 +136,6 @@ class _WindowsInternsScreenState extends State<WindowsInternsScreen> {
     return ScaffoldPage(
       header: PageHeader(
         title: const Text('인턴 관리'),
-        commandBar: CommandBar(
-          mainAxisAlignment: MainAxisAlignment.end,
-          primaryItems: [
-            CommandBarButton(
-              icon: const Icon(FluentIcons.refresh),
-              label: const Text('새로고침'),
-              onPressed: _loadInterns,
-            ),
-          ],
-        ),
       ),
       content: _isLoading
           ? const Center(child: ProgressRing())
@@ -907,17 +897,6 @@ class _ChecklistTabState extends State<_ChecklistTab> {
                     : '총 ${_submissions.length}건',
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-              const Spacer(),
-              Button(
-                onPressed: _load,
-                child: const Row(
-                  children: [
-                    Icon(FluentIcons.refresh, size: 14),
-                    SizedBox(width: 4),
-                    Text('새로고침', style: TextStyle(fontSize: 12)),
-                  ],
-                ),
-              ),
             ],
           ),
         ),
@@ -1119,17 +1098,6 @@ class _InternLogTabState extends State<_InternLogTab> {
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
                   color: Color(0xFFB44F4F),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Button(
-                onPressed: _load,
-                child: const Row(
-                  children: [
-                    Icon(FluentIcons.refresh, size: 14),
-                    SizedBox(width: 4),
-                    Text('새로고침', style: TextStyle(fontSize: 12)),
-                  ],
                 ),
               ),
             ],

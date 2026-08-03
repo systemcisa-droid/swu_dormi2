@@ -4,29 +4,40 @@ class StudentModel {
   final String id;
   final String email;
   final String name;
+  final String? nickname;
   final String studentId;
   final String phoneNumber;
   final String roomNumber;
+  final String? college;
+  final String? department;
+  final String? seatNumber;
   final String? dormBuilding;
   final String? profileImageUrl;
+  final int points;
   final DateTime createdAt;
+  final String residentStatus;
 
   StudentModel({
     required this.id,
     required this.email,
     required this.name,
+    this.nickname,
     required this.studentId,
     required this.phoneNumber,
     required this.roomNumber,
+    this.college,
+    this.department,
+    this.seatNumber,
     this.dormBuilding,
     this.profileImageUrl,
+    this.points = 0,
     required this.createdAt,
+    this.residentStatus = '재실중',
   });
 
   factory StudentModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
 
-    // createdAt 필드를 안전하게 파싱
     DateTime parseCreatedAt(dynamic value) {
       if (value == null) return DateTime.now();
       if (value is Timestamp) {
@@ -45,12 +56,18 @@ class StudentModel {
       id: doc.id,
       email: data['email'] ?? '',
       name: data['name'] ?? '',
+      nickname: data['nickname'] as String?,
       studentId: data['studentId'] ?? '',
-      phoneNumber: data['phoneNumber'] ?? '',
+      phoneNumber: (data['phoneNumber'] as String?)?.isNotEmpty == true ? data['phoneNumber'] as String : (data['phone'] as String?)?.isNotEmpty == true ? data['phone'] as String : (data['phone_number'] as String?)?.isNotEmpty == true ? data['phone_number'] as String : (data['mobile'] as String?) ?? '',
       roomNumber: data['roomNumber'] ?? '',
+      college: data['college'] as String?,
+      department: data['department'] as String?,
+      seatNumber: data['seatNumber'] as String?,
       dormBuilding: data['dormBuilding'] as String?,
       profileImageUrl: data['profileImageUrl'],
+      points: (data['points'] as num?)?.toInt() ?? 0,
       createdAt: parseCreatedAt(data['createdAt']),
+      residentStatus: (data['residentStatus'] as String?) ?? '재실중',
     );
   }
 
@@ -58,11 +75,17 @@ class StudentModel {
     return {
       'email': email,
       'name': name,
+      if (nickname != null) 'nickname': nickname,
       'studentId': studentId,
       'phoneNumber': phoneNumber,
       'roomNumber': roomNumber,
+      if (college != null) 'college': college,
+      if (department != null) 'department': department,
+      if (seatNumber != null) 'seatNumber': seatNumber,
       'dormBuilding': dormBuilding,
+      'residentStatus': residentStatus,
       'profileImageUrl': profileImageUrl,
+      'points': points,
       'createdAt': Timestamp.fromDate(createdAt),
     };
   }
@@ -75,13 +98,13 @@ class StudentModel {
   };
 
   String get roomCapacity {
-    if (dormBuilding != null && dormBuilding != '샬롬하우스') return '';
+    if (dormBuilding == null || !dormBuilding!.startsWith('샬롬하우스')) return '';
     if (roomNumber.isEmpty || roomNumber == '000') return '';
     final roomNum = int.tryParse(roomNumber);
     if (roomNum == null) return '';
     final lastTwoDigits = roomNum % 100;
     final cap = _roomCapacities[lastTwoDigits];
-    if (cap != null) return '${cap}인실';
+    if (cap != null) return '$cap인실';
     return '';
   }
 }

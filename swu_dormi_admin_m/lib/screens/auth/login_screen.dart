@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:swu_dormi_admin/services/auth_service.dart';
 import 'package:swu_dormi_admin/main.dart';
 import 'package:swu_dormi_admin/constants/floor_captain_accounts.dart';
+import 'signup_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -38,7 +39,7 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('이 앱은 층장 계정만 로그인할 수 있습니다.'),
+            content: Text('이 앱은 관리자 인증 후 층장 계정만 로그인할 수 있습니다.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -70,11 +71,17 @@ class _LoginScreenState extends State<LoginScreen> {
     final uid = _authService.currentUser?.uid;
     if (uid != null) {
       try {
+        final defaultFloor = kFloorCaptainAccounts[email];
+        // defaultFloor: 계정 고유 기본 구역 (항상 유지)
+        // assignedFloor: 프로필에서 변경 가능한 현재 구역 (처음엔 defaultFloor로 초기화)
+        final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        final hasAssigned = doc.data()?['assignedFloor'] != null;
         await FirebaseFirestore.instance.collection('users').doc(uid).set(
           {
             'role': 'admin_m',
             'email': email,
-            'assignedFloor': kFloorCaptainAccounts[email],
+            'defaultFloor': defaultFloor,
+            if (!hasAssigned) 'assignedFloor': defaultFloor,
           },
           SetOptions(merge: true),
         );
@@ -98,12 +105,12 @@ class _LoginScreenState extends State<LoginScreen> {
     return Scaffold(
       body: Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(
+          gradient: const LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Theme.of(context).colorScheme.primary,
-              Theme.of(context).colorScheme.primaryContainer,
+              Color(0xFFB44F4F),
+              Color(0xFFEA9694),
             ],
           ),
         ),
@@ -131,7 +138,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             width: 80,
                             height: 80,
                             decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.primary,
+                              color: const Color(0xFFED4343),
                               shape: BoxShape.circle,
                             ),
                             child: Center(
@@ -150,7 +157,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       child: Text(
                                         'SWU',
                                         style: TextStyle(
-                                          color: Theme.of(context).colorScheme.primary,
+                                          color: const Color(0xFFEF4D4D),
                                           fontSize: 14,
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -254,6 +261,32 @@ class _LoginScreenState extends State<LoginScreen> {
                                     style: TextStyle(fontSize: 16),
                                   ),
                           ),
+                          const SizedBox(height: 12),
+                          OutlinedButton(
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const SignupScreen(),
+                                ),
+                              );
+                            },
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            child: const Text(
+                              '회원가입',
+                              style: TextStyle(fontSize: 16),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: _showPasswordResetDialog,
+                            child: const Text('비밀번호를 잊으셨나요?'),
+                          ),
                         ],
                       ),
                     ),
@@ -263,6 +296,71 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _showPasswordResetDialog() {
+    final emailIdController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('비밀번호 재설정'),
+        content: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: emailIdController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: '이메일 아이디',
+                  hintText: '아이디를 입력하세요',
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(left: 4, bottom: 4),
+              child: Text('@swu.ac.kr', style: TextStyle(fontSize: 14)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final emailId = emailIdController.text.trim();
+              if (emailId.isEmpty) return;
+              final email = '$emailId@swu.ac.kr';
+              try {
+                await _authService.sendPasswordResetEmail(email);
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    const SnackBar(
+                      content: Text('비밀번호 재설정 이메일이 발송되었습니다'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (dialogContext.mounted) {
+                  Navigator.pop(dialogContext);
+                  ScaffoldMessenger.of(dialogContext).showSnackBar(
+                    SnackBar(
+                      content: Text(e.toString().replaceAll('Exception: ', '')),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('전송'),
+          ),
+        ],
       ),
     );
   }

@@ -152,7 +152,7 @@ class _RoomInspectionHistoryContentState
           if (wing != null) {
             userFloorLabels['$dormBuilding|$roomNumber'] =
                 '$dormBuilding $wing ${floorNum}층';
-          } else if (dormBuilding == '샬롬하우스(여름방학)') {
+          } else if (dormBuilding == '샬롬하우스(겨울방학)') {
             userFloorLabels['$dormBuilding|$roomNumber'] =
                 '$dormBuilding A동 ${floorNum}층';
           }
@@ -267,7 +267,7 @@ class _RoomInspectionHistoryContentState
       final vacantRoomKeys = <String>{};
       for (final floor in kFloorOptions) {
         final dorm = _buildingFromFloor(floor);
-        if (dorm != '샬롬하우스' && dorm != '국제생활관' && dorm != '샬롬하우스(여름방학)') continue;
+        if (dorm != '샬롬하우스' && dorm != '국제생활관' && dorm != '샬롬하우스(겨울방학)') continue;
         final wing = floor.contains('A동')
             ? 'A동'
             : floor.contains('B동')
@@ -290,7 +290,7 @@ class _RoomInspectionHistoryContentState
             roomNumbers = [for (var i = 301; i <= 329; i++) i];
           else
             roomNumbers = [];
-        } else if (dorm == '샬롬하우스(여름방학)') {
+        } else if (dorm == '샬롬하우스(겨울방학)') {
           // A동만 존재: 201~220, 301~320, 401~420
           final base = floorNum * 100;
           roomNumbers = [for (var i = base + 1; i <= base + 20; i++) i];
@@ -349,7 +349,7 @@ class _RoomInspectionHistoryContentState
       }
 
       int buildingOrder(String key) {
-        if (key.startsWith('샬롬하우스(여름방학)')) return 3;
+        if (key.startsWith('샬롬하우스(겨울방학)')) return 3;
         if (key.startsWith('샬롬하우스')) return 0;
         if (key.startsWith('국제생활관')) return 1;
         if (key.startsWith('바롬인성교육관')) return 2;
@@ -631,9 +631,9 @@ class _RoomInspectionHistoryContentState
       return '국제생활관 $wing ${floorNum}층';
     }
 
-    if (building == '샬롬하우스(여름방학)') {
+    if (building == '샬롬하우스(겨울방학)') {
       final floorNum = roomNum ~/ 100;
-      return '샬롬하우스(여름방학) A동 ${floorNum}층';
+      return '샬롬하우스(겨울방학) A동 ${floorNum}층';
     }
 
     if (building == '샬롬하우스') {
@@ -680,7 +680,7 @@ class _RoomInspectionHistoryContentState
         return 'B동';
       return null;
     }
-    if (dormBuilding == '샬롬하우스(여름방학)') return 'A동'; // 201~220, 301~320, 401~420 모두 A동
+    if (dormBuilding == '샬롬하우스(겨울방학)') return 'A동'; // 201~220, 301~320, 401~420 모두 A동
     // 샬롬하우스
     final lastTwo = roomNum % 100;
     if (lastTwo >= 1 && lastTwo <= 20) return 'A동';
@@ -691,7 +691,7 @@ class _RoomInspectionHistoryContentState
   // floor 문자열에서 건물명 추출
   static String? _buildingFromFloor(String? floor) {
     if (floor == null || floor.isEmpty) return null;
-    if (floor.startsWith('샬롬하우스(여름방학)')) return '샬롬하우스(여름방학)';
+    if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
@@ -978,11 +978,6 @@ class _RoomInspectionHistoryContentState
                 const Text('엑셀 다운로드', style: TextStyle(fontSize: 12)),
               ],
             ),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(FluentIcons.refresh, size: 14),
-            onPressed: _loadData,
           ),
         ],
       ),
@@ -1289,7 +1284,7 @@ class _RoomInspectionHistoryContentState
                             final residentCount =
                                 _residentCountByRoom[roomKey] ?? 0;
                             final capLabel = buildingLabel == '샬롬하우스' ||
-                                    buildingLabel == '샬롬하우스(여름방학)'
+                                    buildingLabel == '샬롬하우스(겨울방학)'
                                 ? roomCapacityLabel(roomNumber)
                                 : '';
                             final capNum = int.tryParse(

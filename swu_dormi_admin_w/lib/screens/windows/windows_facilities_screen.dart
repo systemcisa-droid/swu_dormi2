@@ -233,9 +233,9 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
       if (floor >= 2 && floor <= 7) return '샬롬하우스 $building ${floor}층';
     }
 
-    if (dormBuilding == '샬롬하우스(여름방학)' && roomNum != null) {
+    if (dormBuilding == '샬롬하우스(겨울방학)' && roomNum != null) {
       final floor = roomNum ~/ 100;
-      if (floor >= 2 && floor <= 4) return '샬롬하우스(여름방학) A동 ${floor}층';
+      if (floor >= 5 && floor <= 7) return '샬롬하우스(겨울방학) A동 ${floor}층';
     }
 
     return '';
@@ -372,9 +372,9 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
               chip(f, f),
           ])),
           const SizedBox(height: 8),
-          // 샬롬하우스(여름방학)
+          // 샬롬하우스(겨울방학)
           scrollRow(withSep([
-            for (final f in kFloorOptions.where((f) => f.startsWith('샬롬하우스(여름방학)')))
+            for (final f in kFloorOptions.where((f) => f.startsWith('샬롬하우스(겨울방학)')))
               chip(f, f),
           ])),
         ],
@@ -589,11 +589,6 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                               Text('엑셀 다운로드', style: TextStyle(fontSize: 12)),
                             ],
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(FluentIcons.refresh),
-                          onPressed: _loadReports,
                         ),
                       ],
                     ),

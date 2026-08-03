@@ -7,7 +7,8 @@ class FacilityReportModel {
   final String roomNumber;
   final String? seatNumber;
   final String? building;
-  final String category; // 'maintenance', 'plumbing', 'electrical', 'other'
+  final String? dormBuilding;
+  final String category; // 'maintenance', 'plumbing', 'electrical', 'common_area', 'other'
   final String description;
   final List<String>? mediaUrls;
   final DateTime reportedAt;
@@ -25,6 +26,7 @@ class FacilityReportModel {
     required this.roomNumber,
     this.seatNumber,
     this.building,
+    this.dormBuilding,
     required this.category,
     required this.description,
     this.mediaUrls,
@@ -63,6 +65,7 @@ class FacilityReportModel {
       roomNumber: data['roomNumber'] ?? '',
       seatNumber: data['seatNumber'],
       building: data['building'],
+      dormBuilding: data['dormBuilding'],
       category: data['category'] ?? 'other',
       description: data['description'] ?? '',
       mediaUrls: mediaUrls,
@@ -81,6 +84,7 @@ class FacilityReportModel {
       case 'maintenance': return '가구/도어';
       case 'plumbing': return '수도설비';
       case 'electrical': return '전기';
+      case 'common_area': return '공동구역(헬스장, 기도실 등)';
       case 'other': return '기타';
       default: return category;
     }

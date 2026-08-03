@@ -145,6 +145,74 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
     }
   }
 
+  /// 같은 학번으로 가입된 계정이 2개 이상인 경우를 찾는다.
+  /// (QR 출석체크 등 학번으로 학생을 조회하는 기능에서 잘못된 계정이 조회될 위험이 있다.)
+  Map<String, List<UserModel>> get _duplicateStudentIdGroups {
+    final byStudentId = <String, List<UserModel>>{};
+    for (final u in _allStudents) {
+      if (u.studentId.isEmpty) continue;
+      byStudentId.putIfAbsent(u.studentId, () => []).add(u);
+    }
+    byStudentId.removeWhere((_, list) => list.length < 2);
+    return byStudentId;
+  }
+
+  void _showDuplicateStudentIdDialog() {
+    final duplicates = _duplicateStudentIdGroups;
+    showDialog(
+      context: context,
+      builder: (context) => ContentDialog(
+        title: const Text('중복 학번 계정 검색'),
+        constraints: const BoxConstraints(maxWidth: 560, maxHeight: 600),
+        content: duplicates.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('중복된 학번으로 가입된 계정이 없습니다.'),
+              )
+            : SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${duplicates.length}개 학번이 중복 가입되어 있습니다. QR 출석체크 시 잘못된 계정이 조회될 수 있으니 아래 계정 중 불필요한 쪽을 정리해주세요.',
+                      style: TextStyle(color: Colors.orange, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 12),
+                    ...duplicates.entries.map((entry) => Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('학번: ${entry.key}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 6),
+                              ...entry.value.map((u) => Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      '- ${u.name} / ${u.dormBuilding ?? '미배정'} ${u.roomNumber == '000' ? '(호실 미배정)' : '${u.roomNumber}호'} / ${u.email}',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  )),
+                            ],
+                          ),
+                        )),
+                  ],
+                ),
+              ),
+        actions: [
+          Button(
+            child: const Text('닫기'),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ],
+      ),
+    );
+  }
+
   // 엑셀을 읽을 수 없을 때 미가입자 목록과 선택 상태를 비운다.
   // (엑셀이 삭제/교체된 뒤에도 유령 항목이 남지 않도록)
   void _clearUnregisteredStudents() {
@@ -692,7 +760,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                       ComboBoxItem(value: '샬롬하우스', child: Text('샬롬하우스')),
                       ComboBoxItem(value: '국제생활관', child: Text('국제생활관')),
                       ComboBoxItem(value: '바롬인성교육관', child: Text('바롬인성교육관')),
-                      ComboBoxItem(value: '샬롬하우스(여름방학)', child: Text('샬롬하우스(여름방학)')),
+                      ComboBoxItem(value: '샬롬하우스(겨울방학)', child: Text('샬롬하우스(겨울방학)')),
                     ],
                     onChanged: (v) => setDialogState(() => selectedDormBuilding = v),
                   ),
@@ -921,7 +989,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
   }
 
   static Color _buildingColor(String? dormBuilding) {
-    if (dormBuilding == '샬롬하우스' || dormBuilding == '샬롬하우스(여름방학)') {
+    if (dormBuilding == '샬롬하우스' || dormBuilding == '샬롬하우스(겨울방학)') {
       return const Color(0xFF2196F3);
     }
     if (dormBuilding == '국제생활관') return const Color(0xFF4CAF50);
@@ -1114,15 +1182,15 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                 onTap: () => setFilter('바롬인성교육관', null, null)),
           ]),
           const SizedBox(height: 8),
-          // 샬롬하우스(여름방학)
+          // 샬롬하우스(겨울방학)
           scrollRow([
-            for (int f = 2; f <= 4; f++) ...[
+            for (int f = 5; f <= 7; f++) ...[
               _buildStatChip(
-                  context, '샬롬하우스 A동 $f층(여름방학)',
-                  countBy('샬롬하우스(여름방학)', 'A', f),
-                  isSelected: isActive('샬롬하우스(여름방학)', 'A', f),
-                  onTap: () => setFilter('샬롬하우스(여름방학)', 'A', f)),
-              if (f < 4) const SizedBox(width: 6),
+                  context, '샬롬하우스 A동 $f층(겨울방학)',
+                  countBy('샬롬하우스(겨울방학)', 'A', f),
+                  isSelected: isActive('샬롬하우스(겨울방학)', 'A', f),
+                  onTap: () => setFilter('샬롬하우스(겨울방학)', 'A', f)),
+              if (f < 7) const SizedBox(width: 6),
             ],
           ]),
         ],
@@ -1502,7 +1570,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
       ..sort((a, b) {
         // 가입자를 먼저, 그 다음 미가입자
         if (a.isRegistered != b.isRegistered) return a.isRegistered ? -1 : 1;
-        const buildingOrder = ['샬롬하우스', '국제생활관', '바롬인성교육관', '샬롬하우스(여름방학)'];
+        const buildingOrder = ['샬롬하우스', '국제생활관', '바롬인성교육관', '샬롬하우스(겨울방학)'];
         final aIdx = buildingOrder.indexOf(a.displayDormBuilding ?? '');
         final bIdx = buildingOrder.indexOf(b.displayDormBuilding ?? '');
         final aBuildingIdx = aIdx == -1 ? buildingOrder.length : aIdx;
@@ -1555,16 +1623,17 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                                 ),
                                 const Spacer(),
                                 Tooltip(
-                                  message: '새로고침',
-                                  child: IconButton(
-                                    icon: _isLoading
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: ProgressRing(strokeWidth: 2),
-                                          )
-                                        : const Icon(FluentIcons.refresh, size: 16),
-                                    onPressed: _isLoading ? null : _loadStudents,
+                                  message: '같은 학번으로 가입된 계정이 있는지 검사합니다',
+                                  child: Button(
+                                    onPressed: _showDuplicateStudentIdDialog,
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(FluentIcons.warning, size: 14),
+                                        SizedBox(width: 6),
+                                        Text('중복 학번 검색', style: TextStyle(fontSize: 12)),
+                                      ],
+                                    ),
                                   ),
                                 ),
                               ],
