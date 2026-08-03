@@ -11,6 +11,7 @@ import 'providers/locale_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/privacy_consent_screen.dart';
+import 'screens/auth/google_student_id_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'utils/constants.dart';
 
@@ -212,6 +213,8 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         if (authProvider.isAuthenticated) {
           return const HomeScreen();
+        } else if (authProvider.pendingGoogleUid != null) {
+          return const GoogleStudentIdScreen();
         } else {
           return const LoginScreen();
         }

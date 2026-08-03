@@ -7,7 +7,7 @@ class CleaningInspectionStrings {
   String get title => _t('단위실 청소점검 월검사/퇴사검사', 'Room Cleaning Inspection (Monthly/Move-out)');
   String get retry => _t('다시 시도', 'Retry');
   String get residenceInfoMissing =>
-      _t('기숙사 건물, 호실, 자리번호가 등록되어 있지 않습니다.\n프로필은 기숙사 입사날 자동 업데이트됩니다.',
+      _t('기숙사 건물, 호실, 자리번호가 등록되어 있지 않습니다.\n프로필은 기숙사 입사일 자동 업데이트됩니다.',
           'Your dormitory building, room, and seat number are not registered.\nyour profile will be automatically updated on the day you move into the dormitory".');
   String get loadError => _t('데이터를 불러오는 중 오류가 발생했습니다', 'An error occurred while loading data');
 

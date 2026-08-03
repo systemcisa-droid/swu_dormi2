@@ -13,10 +13,14 @@ class AuthProvider extends ChangeNotifier {
   StreamSubscription<User?>? _authSubscription;
   UserModel? _currentUser;
   bool _isLoading = true;
+  // Firebase Auth 로그인은 성공했지만 아직 users 문서가 없는(학번 미입력) 신규 가입자의 uid.
+  // null이 아니면 화면은 학번 입력 페이지를 보여줘야 한다.
+  String? _pendingGoogleUid;
 
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _currentUser != null;
+  String? get pendingGoogleUid => _pendingGoogleUid;
 
   AuthProvider() {
     _initAuth();
@@ -54,10 +58,19 @@ class AuthProvider extends ChangeNotifier {
           final fetched = await _authService.getUserData(user.uid);
           if (fetched != null) {
             _currentUser = fetched;
+            _pendingGoogleUid = null;
             await _saveUserToCache(fetched);
           } else {
-            // Firestore 문서가 없으면 캐시에서 복원
-            _currentUser = await _loadCachedUser();
+            // Firestore 문서가 없으면 캐시에서 먼저 복원을 시도한다.
+            final cached = await _loadCachedUser();
+            if (cached != null) {
+              _currentUser = cached;
+            } else {
+              // 캐시도 없다면 학번을 아직 입력하지 않은 신규 가입자로 간주해
+              // 화면이 학번 입력 페이지로 이동하도록 상태를 남긴다.
+              _currentUser = null;
+              _pendingGoogleUid = user.uid;
+            }
           }
         } catch (_) {
           // 네트워크 오류 등 → 캐시에서 복원
@@ -65,6 +78,7 @@ class AuthProvider extends ChangeNotifier {
         }
       } else {
         _currentUser = null;
+        _pendingGoogleUid = null;
         await _clearUserCache();
       }
       _isLoading = false;
@@ -120,11 +134,21 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<String?> signInWithGoogle({required String studentId}) async {
+  Future<bool> isStudentIdAvailable(String studentId) {
+    return _authService.isStudentIdAvailable(studentId);
+  }
+
+  // 반환값: null이면 취소(사용자가 팝업을 닫음), 문자열이면 에러 메시지.
+  // 성공 시에는 authStateChanges 리스너가 _currentUser 또는 _pendingGoogleUid를 채운다.
+  Future<String?> signInWithGoogle() async {
     try {
-      final credential = await _authService.signInWithGoogle(studentId: studentId);
-      if (credential?.user != null) {
-        final userData = await _authService.getUserData(credential!.user!.uid);
+      final result = await _authService.signInWithGoogle();
+      if (result == null) return null; // 사용자가 취소함
+
+      if (!result.isNewUser) {
+        // 기존 가입자 재로그인 — role 검사(학생 계정만 허용)
+        final uid = result.userCredential.user?.uid;
+        final userData = uid != null ? await _authService.getUserData(uid) : null;
         if (userData == null || userData.role != 'student') {
           await _authService.signOut();
           return '학생 계정만 로그인할 수 있습니다.';
@@ -132,8 +156,35 @@ class AuthProvider extends ChangeNotifier {
       }
       return null;
     } catch (e) {
-      return e.toString();
+      final message = e.toString();
+      return message.startsWith('Exception: ') ? message.substring(11) : message;
     }
+  }
+
+  // 학번 입력 페이지에서 호출. 성공하면 authStateChanges가 재평가되어 홈으로 이동한다.
+  Future<String?> registerStudentId(String studentId) async {
+    if (_pendingGoogleUid == null) return '로그인 상태를 확인할 수 없습니다.';
+    try {
+      await _authService.registerStudentId(uid: _pendingGoogleUid!, studentId: studentId);
+      final fetched = await _authService.getUserData(_pendingGoogleUid!);
+      if (fetched != null) {
+        _currentUser = fetched;
+        _pendingGoogleUid = null;
+        await _saveUserToCache(fetched);
+        notifyListeners();
+      }
+      return null;
+    } catch (e) {
+      final message = e.toString();
+      return message.startsWith('Exception: ') ? message.substring(11) : message;
+    }
+  }
+
+  // 학번 입력 페이지에서 취소(뒤로가기)한 경우 호출.
+  Future<void> cancelPendingGoogleSignUp() async {
+    await _authService.cancelPendingGoogleSignUp();
+    _pendingGoogleUid = null;
+    notifyListeners();
   }
 
   Future<void> signOut() async {
@@ -183,7 +234,9 @@ class AuthProvider extends ChangeNotifier {
     }
   }
 
-  Future<String?> deleteAccount({required String password}) async {
+  bool get isGoogleSignedIn => _authService.isGoogleSignedIn;
+
+  Future<String?> deleteAccount({String? password}) async {
     try {
       await _authService.deleteAccount(password: password);
       _currentUser = null;
@@ -191,7 +244,8 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return null;
     } catch (e) {
-      return e.toString();
+      final message = e.toString();
+      return message.startsWith('Exception: ') ? message.substring(11) : message;
     }
   }
 }

@@ -18,7 +18,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailIdController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _googleStudentIdController = TextEditingController(text: '20');
   bool _isLoading = false;
   bool _isGoogleLoading = false;
   bool _obscurePassword = true;
@@ -27,7 +26,6 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _emailIdController.dispose();
     _passwordController.dispose();
-    _googleStudentIdController.dispose();
     super.dispose();
   }
 
@@ -51,26 +49,11 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  bool get _isGoogleStudentIdValid =>
-      RegExp(r'^[0-9]{10}$').hasMatch(_googleStudentIdController.text.trim());
-
   Future<void> _handleGoogleLogin() async {
-    final isEnglish = Provider.of<LocaleProvider>(context, listen: false).isEnglish;
-    final s = LoginStrings(isEnglish);
-
-    if (!_isGoogleStudentIdValid) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(s.googleStudentIdInvalid), backgroundColor: Colors.orange),
-      );
-      return;
-    }
-
     setState(() => _isGoogleLoading = true);
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final error = await authProvider.signInWithGoogle(
-      studentId: _googleStudentIdController.text.trim(),
-    );
+    final error = await authProvider.signInWithGoogle();
 
     if (!mounted) return;
     setState(() => _isGoogleLoading = false);
@@ -138,7 +121,11 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 8),
                 TextFormField(
                   controller: _emailIdController,
-                  keyboardType: TextInputType.emailAddress,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(10),
+                  ],
                   decoration: InputDecoration(
                     labelText: s.emailId,
                     prefixIcon: const Icon(Icons.email),
@@ -148,6 +135,9 @@ class _LoginScreenState extends State<LoginScreen> {
                   validator: (value) {
                     if (value == null || value.trim().isEmpty) {
                       return s.emailIdRequired;
+                    }
+                    if (!RegExp(r'^[0-9]{10}$').hasMatch(value.trim())) {
+                      return s.googleStudentIdInvalid;
                     }
                     return null;
                   },
@@ -233,34 +223,8 @@ class _LoginScreenState extends State<LoginScreen> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: _googleStudentIdController,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [
-                    FilteringTextInputFormatter.digitsOnly,
-                    LengthLimitingTextInputFormatter(10),
-                  ],
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    labelText: s.googleStudentIdLabel,
-                    hintText: s.googleStudentIdHint,
-                    prefixIcon: const Icon(Icons.badge_outlined),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(
-                    s.googleStudentIdGuide,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
-                ),
-                const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: (_isGoogleLoading || !_isGoogleStudentIdValid)
-                      ? null
-                      : _handleGoogleLogin,
+                  onPressed: _isGoogleLoading ? null : _handleGoogleLogin,
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     side: BorderSide(color: Colors.grey.shade400),

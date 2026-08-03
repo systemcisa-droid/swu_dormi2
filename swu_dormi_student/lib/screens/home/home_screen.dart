@@ -769,7 +769,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           const Text(
-            '샬롬하우스',
+            '기숙사(2학기)',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,

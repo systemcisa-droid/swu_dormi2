@@ -22,6 +22,9 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   }
 
   Future<void> _deleteAccount() async {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final isGoogle = authProvider.isGoogleSignedIn;
+
     if (!_confirmed) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -31,7 +34,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
       );
       return;
     }
-    if (_passwordController.text.isEmpty) {
+    if (!isGoogle && _passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('비밀번호를 입력해주세요.'),
@@ -66,9 +69,8 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
     setState(() => _isLoading = true);
     if (!mounted) return;
 
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final error = await authProvider.deleteAccount(
-      password: _passwordController.text,
+      password: isGoogle ? null : _passwordController.text,
     );
 
     if (!mounted) return;
@@ -99,6 +101,7 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isGoogle = Provider.of<AuthProvider>(context).isGoogleSignedIn;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24.0),
       child: Column(
@@ -146,33 +149,45 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
             ),
           ),
           const SizedBox(height: 32),
-          const Text(
-            '비밀번호 확인',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '본인 확인을 위해 현재 비밀번호를 입력해주세요.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _passwordController,
-            obscureText: _obscurePassword,
-            decoration: InputDecoration(
-              hintText: '비밀번호 입력',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              suffixIcon: IconButton(
-                icon: Icon(
-                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
+          if (isGoogle) ...[
+            const Text(
+              '본인 확인',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '탈퇴하기를 누르면 Google 계정 확인 창이 표시됩니다.\n본인 계정으로 다시 로그인하여 확인해주세요.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600, height: 1.5),
+            ),
+          ] else ...[
+            const Text(
+              '비밀번호 확인',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '본인 확인을 위해 현재 비밀번호를 입력해주세요.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _passwordController,
+              obscureText: _obscurePassword,
+              decoration: InputDecoration(
+                hintText: '비밀번호 입력',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                onPressed: () =>
-                    setState(() => _obscurePassword = !_obscurePassword),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                  ),
+                  onPressed: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                ),
               ),
             ),
-          ),
+          ],
           const SizedBox(height: 24),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,

@@ -35,7 +35,7 @@ class FacilityReportStrings {
   String get loginRequired => _t('로그인이 필요합니다', 'Login required');
 
   String get residenceInfoMissingBanner =>
-      _t('기숙사 건물, 호실, 자리번호가 등록되어 있지 않습니다.\n프로필은 기숙사 입사날 자동 업데이트됩니다.',
+      _t('기숙사 건물, 호실, 자리번호가 등록되어 있지 않습니다.\n프로필은 기숙사 입사일 자동 업데이트됩니다.',
           'Your dormitory building, room, and seat number are not registered.\nyour profile will be automatically updated on the day you move into the dormitory.');
 
   String get processing => _t('처리 중...', 'Processing...');

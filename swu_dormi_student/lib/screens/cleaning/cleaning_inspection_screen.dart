@@ -156,12 +156,6 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(s.title),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-          ),
-        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())

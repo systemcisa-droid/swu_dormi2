@@ -1,13 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:fluttertoast/fluttertoast.dart';
-import 'package:vibration/vibration.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../utils/attendance_strings.dart';
+import '../../widgets/user_avatar.dart';
 
 class AttendanceScreen extends StatefulWidget {
   const AttendanceScreen({super.key});
@@ -28,6 +28,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   static const _blockedStatuses = {'자퇴', '바롬인성교육관'};
 
   bool get _isBlocked => _blockedStatuses.contains(_residentStatus) || _residenceInfoMissing;
+
+  bool _autoOpened = false;
 
   bool _hasValidResidenceInfo(dynamic user) {
     if (user == null) return false;
@@ -82,6 +84,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _myRecords = recordList;
         _isLoading = false;
       });
+
+      // 사이드 메뉴에서 진입하면 바로 내 QR 코드를 보여준다 (최초 1회만).
+      if (!_autoOpened && !_isBlocked) {
+        _autoOpened = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _showMyQrCode();
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -97,12 +107,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(s.title),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-          ),
-        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -118,13 +122,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   ),
                 )
               : _buildContent(s),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _isBlocked ? null : _openQrScanner,
-        icon: Icon(_isBlocked ? Icons.block : Icons.qr_code_scanner),
-        label: Text(_isBlocked ? s.attendanceBlocked : s.qrScan),
-        backgroundColor: _isBlocked ? Colors.grey.shade400 : Colors.indigo,
-        foregroundColor: Colors.white,
-      ),
     );
   }
 
@@ -188,7 +185,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           child: Row(
             children: [
-              Icon(Icons.qr_code_scanner, size: 32, color: Colors.indigo.shade700),
+              Icon(Icons.qr_code, size: 32, color: Colors.indigo.shade700),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -315,253 +312,221 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  // ──────────── QR 스캐너 ────────────
-  void _openQrScanner() {
+  // ──────────── 내 QR 코드 표시 ────────────
+  void _showMyQrCode() {
     if (_isBlocked) return;
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => _QrScannerPage(
-          onScanned: (String qrData) => _processQrCode(qrData),
-        ),
-      ),
-    );
-  }
-
-  Future<void> _processQrCode(String qrData) async {
-    final s = AttendanceStrings(
-        Provider.of<LocaleProvider>(context, listen: false).isEnglish);
-    // 상태 재확인 (QR 스캔 후 돌아왔을 때 방어)
-    if (_isBlocked) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(s.currentStatusBlockedShort(s.status(_residentStatus))),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-      return;
-    }
-
-    // QR 형식: "attendance:{eventId}:{token}"
-    final parts = qrData.split(':');
-    if (parts.length != 3 || parts[0] != 'attendance') {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(s.invalidQrCode), backgroundColor: Colors.red),
-        );
-      }
-      return;
-    }
-
-    final eventId = parts[1];
-    final token = parts[2];
-
-    if (token.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(s.expiredQrCode), backgroundColor: Colors.orange),
-        );
-      }
-      return;
-    }
-
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final user = authProvider.currentUser;
     if (user == null) return;
 
-    try {
-      // 이벤트 존재 여부 및 토큰 검증
-      final eventDoc = await _firestore.collection('attendance_events').doc(eventId).get();
-      if (!eventDoc.exists) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(s.eventNotFound), backgroundColor: Colors.red),
-          );
-        }
-        return;
-      }
-
-      final eventData = eventDoc.data()!;
-      final eventStatus = eventData['status'] as String?;
-      final currentToken = eventData['currentToken'] as String?;
-
-      if (eventStatus != 'active') {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(s.eventEnded), backgroundColor: Colors.orange),
-          );
-        }
-        return;
-      }
-
-      if (currentToken == null || currentToken.isEmpty || currentToken != token) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(s.expiredQrCode), backgroundColor: Colors.orange),
-          );
-        }
-        return;
-      }
-
-      // 호실 검증
-      final eventRoomNumber = eventData['roomNumber'] as String?;
-      if (eventRoomNumber != null && eventRoomNumber.isNotEmpty) {
-        final studentRoom = user.roomNumber;
-        if (studentRoom.isEmpty || studentRoom == '000' || studentRoom != eventRoomNumber) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(s.roomMismatch(eventRoomNumber, studentRoom)),
-                backgroundColor: Colors.red,
-                duration: const Duration(seconds: 4),
-              ),
-            );
-          }
-          return;
-        }
-      }
-
-      // 중복 체크
-      final existing = await _firestore
-          .collection('attendance_records')
-          .where('userId', isEqualTo: user.uid)
-          .where('eventId', isEqualTo: eventId)
-          .get();
-
-      if (existing.docs.isNotEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(s.alreadyCheckedIn), backgroundColor: Colors.orange),
-          );
-        }
-        return;
-      }
-
-      // 출석 기록 저장
-      final batch = _firestore.batch();
-      final recordRef = _firestore.collection('attendance_records').doc();
-      batch.set(recordRef, {
-        'eventId': eventId,
-        'eventTitle': eventData['title'] ?? '',
-        'eventLocation': eventData['location'] ?? '',
-        'userId': user.uid,
-        'userName': user.name,
-        'studentId': user.studentId,
-        'roomNumber': user.roomNumber,
-        'building': user.building,
-        'dormBuilding': user.dormBuilding ?? '',
-        'checkedInAt': Timestamp.now(),
-      });
-
-      final eventRef = _firestore.collection('attendance_events').doc(eventId);
-      batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
-      await batch.commit();
-
-      if (mounted) {
-        // 진동
-        if (await Vibration.hasVibrator() ?? false) {
-          await Vibration.vibrate(duration: 300);
-        }
-        // 토스트 메시지
-        Fluttertoast.showToast(
-          msg: s.checkInCompleted(eventData['title'] ?? ''),
-          toastLength: Toast.LENGTH_LONG,
-          gravity: ToastGravity.CENTER,
-          backgroundColor: Colors.green,
-          textColor: Colors.white,
-          fontSize: 16.0,
-        );
-        _loadData();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(s.checkInFailed(e)), backgroundColor: Colors.red),
-        );
-      }
-    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _MyQrCodePage(
+          uid: user.uid,
+          studentId: user.studentId,
+          profileImageUrl: user.profileImageUrl,
+          userName: user.name,
+          onCheckedIn: _loadData,
+        ),
+      ),
+    );
   }
 }
 
-// ──────────── QR 스캐너 페이지 ────────────
-class _QrScannerPage extends StatefulWidget {
-  final Future<void> Function(String) onScanned;
+// ──────────── 내 QR 코드 페이지 ────────────
+// QR 유효시간: 5초. 만료 전 자동으로 새 QR(타임스탬프 갱신)을 생성한다.
+class _MyQrCodePage extends StatefulWidget {
+  final String uid;
+  final String studentId;
+  final String? profileImageUrl;
+  final String userName;
+  final VoidCallback onCheckedIn;
 
-  const _QrScannerPage({required this.onScanned});
+  const _MyQrCodePage({
+    required this.uid,
+    required this.studentId,
+    required this.profileImageUrl,
+    required this.userName,
+    required this.onCheckedIn,
+  });
 
   @override
-  State<_QrScannerPage> createState() => _QrScannerPageState();
+  State<_MyQrCodePage> createState() => _MyQrCodePageState();
 }
 
-class _QrScannerPageState extends State<_QrScannerPage> {
-  final MobileScannerController _controller = MobileScannerController();
-  bool _isProcessing = false;
+class _MyQrCodePageState extends State<_MyQrCodePage> {
+  static const _validSeconds = 5;
+
+  StreamSubscription<QuerySnapshot>? _recordsSubscription;
+  final Set<String> _seenRecordIds = {};
+  Timer? _refreshTimer;
+  int _issuedAtMs = 0;
+  int _remainingSeconds = _validSeconds;
+
+  @override
+  void initState() {
+    super.initState();
+    _regenerateQr();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_remainingSeconds > 1) {
+        setState(() => _remainingSeconds--);
+      } else {
+        _regenerateQr();
+      }
+    });
+    // 층장이 스캔해 출석 기록이 새로 생기면 자동으로 화면을 닫고 목록을 갱신한다.
+    bool isFirstSnapshot = true;
+    _recordsSubscription = FirebaseFirestore.instance
+        .collection('attendance_records')
+        .where('userId', isEqualTo: widget.uid)
+        .snapshots()
+        .listen((snapshot) {
+      if (isFirstSnapshot) {
+        // 최초 스냅샷은 기존 기록 개수(0건 포함)를 기준으로만 삼고, 이후 콜백에서만 신규 여부를 판단한다.
+        isFirstSnapshot = false;
+        _seenRecordIds.addAll(snapshot.docs.map((d) => d.id));
+        return;
+      }
+      final hasNew = snapshot.docs.any((d) => !_seenRecordIds.contains(d.id));
+      if (hasNew && mounted) {
+        widget.onCheckedIn();
+        Navigator.pop(context);
+      }
+    }, onError: (e) {
+      debugPrint('출석 기록 리스너 오류: $e');
+    });
+  }
+
+  void _regenerateQr() {
+    setState(() {
+      _issuedAtMs = DateTime.now().millisecondsSinceEpoch;
+      _remainingSeconds = _validSeconds;
+    });
+  }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _refreshTimer?.cancel();
+    _recordsSubscription?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final s = AttendanceStrings(Provider.of<LocaleProvider>(context).isEnglish);
+    final qrData = 'student:${widget.studentId}:$_issuedAtMs';
     return Scaffold(
       appBar: AppBar(
-        title: Text(s.qrScanTitle),
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        title: Text(s.myQrCodeTitle),
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
-      body: Stack(
-        children: [
-          MobileScanner(
-            controller: _controller,
-            onDetect: (BarcodeCapture capture) async {
-              if (_isProcessing) return;
-              final barcode = capture.barcodes.firstOrNull;
-              if (barcode == null || barcode.rawValue == null) return;
-
-              final qrData = barcode.rawValue!;
-              if (!qrData.startsWith('attendance:')) return;
-
-              _isProcessing = true;
-              Navigator.pop(context);
-              await widget.onScanned(qrData);
-            },
-          ),
-          // 스캔 영역 가이드
-          Center(
-            child: Container(
-              width: 250,
-              height: 250,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(color: Colors.black26, blurRadius: 4),
+                ],
+              ),
+              child: UserAvatar(
+                imageUrl: widget.profileImageUrl,
+                fallbackName: widget.userName,
+                radius: 84,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.white, width: 2),
-                borderRadius: BorderRadius.circular(12),
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  QrImageView(
+                    data: qrData,
+                    version: QrVersions.auto,
+                    size: 240,
+                    backgroundColor: Colors.white,
+                    errorCorrectionLevel: QrErrorCorrectLevel.H,
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Text(
+                      DateFormat('MM.dd HH:mm:ss').format(DateTime.now()),
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ),
-          // 안내 텍스트
-          Positioned(
-            bottom: 80,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-              color: Colors.black54,
-              child: Text(
-                s.qrScanHint,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
+            const SizedBox(height: 24),
+            Text(
+              widget.userName,
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              widget.studentId,
+              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 2),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.timer,
+                  size: 18,
+                  color: _remainingSeconds <= 2 ? Colors.red : Colors.grey,
                 ),
+                const SizedBox(width: 6),
+                Text(
+                  s.qrValidFor(_remainingSeconds),
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: _remainingSeconds <= 2 ? Colors.red : Colors.grey.shade600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                s.myQrCodeHint,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade600),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

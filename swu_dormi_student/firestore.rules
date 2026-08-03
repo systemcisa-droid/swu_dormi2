@@ -30,6 +30,19 @@ service cloud.firestore {
       }
     }
 
+    // Student IDs collection (학번 중복 검사용, 문서ID = studentId)
+    // 구글 로그인 최초 가입 시 studentId 사용 가능 여부를 비인증 상태에서도 확인할 수 있어야 하므로,
+    // users 컬렉션 전체를 노출하지 않고 이 컬렉션의 문서 존재 여부(get)만 공개한다.
+    // 생성은 본인 uid로 가입할 때만 1회 허용, 삭제는 본인 탈퇴 또는 관리자 처리 시에만 허용,
+    // 학번 자체를 다른 값으로 바꾸는 update는 항상 금지해 선점된 학번을 보호한다.
+    match /student_ids/{studentId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
+      allow update: if false;
+    }
+
     // 상벌점 이력 collectionGroup 쿼리 (관리자 앱 상벌 통계 페이지용)
     // 위 /users/{userId}/point_history 규칙은 일반 서브컬렉션 조회에만 적용되고
     // collectionGroup('point_history') 쿼리에는 별도 규칙이 필요하다.
