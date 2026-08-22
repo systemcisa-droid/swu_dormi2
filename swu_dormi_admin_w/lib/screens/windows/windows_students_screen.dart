@@ -43,17 +43,23 @@ class _StudentListEntry {
 class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
   final _firestoreService = FirestoreService();
   final _dateFormat = DateFormat('yyyy.MM.dd HH:mm');
+  // 정보 수정 후 목록을 다시 불러와도 보고 있던 위치를 유지한다.
+  final _listScrollController = ScrollController();
+  // 재실상태 변경 일시는 연도를 빼고 표시한다.
+  final _statusChangedFormat = DateFormat('MM.dd HH:mm');
   UserModel? _selectedStudent;
   ExcelStudentRow? _selectedUnregistered;
   String _searchQuery = '';
-  String? _filterBuilding;
-  int? _filterFloor;
+  // 초기 로딩 부담을 줄이기 위해 기본 구역(샬롬하우스 A동 2층)으로 시작한다.
+  // 전체 목록은 사용자가 필터를 해제해 볼 수 있다.
+  String? _filterBuilding = 'A';
+  int? _filterFloor = 2;
   List<UserModel> _allStudents = [];
   // 엑셀에는 있으나 users 컬렉션에 이메일이 없는 학생(앱 미가입자)
   List<ExcelStudentRow> _unregisteredStudents = [];
   bool _isLoading = true;
   String _errorMessage = '';
-  String? _filterDormBuilding; // null = 전체, '샬롬하우스', '국제생활관'
+  String? _filterDormBuilding = '샬롬하우스'; // null = 전체, '샬롬하우스', '국제생활관'
   String? _filterResidentStatus; // null = 전체, '바롬인성교육관', '퇴사' (재실상태 기준)
   bool _filterOnlyUnregistered = false; // true면 미가입자만 표시
 
@@ -78,6 +84,12 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
   void initState() {
     super.initState();
     _loadStudents();
+  }
+
+  @override
+  void dispose() {
+    _listScrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadPointHistory(String uid) async {
@@ -128,8 +140,13 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
     }
   }
 
-  Future<void> _loadStudents() async {
-    setState(() { _isLoading = true; _errorMessage = ''; });
+  /// [showLoading]이 false면 로딩 화면으로 교체하지 않고 조용히 갱신한다.
+  /// (수정 후 재조회 시 목록이 사라졌다 다시 그려지며 스크롤이 초기화되는 것을 막는다)
+  Future<void> _loadStudents({bool showLoading = true}) async {
+    setState(() {
+      if (showLoading) _isLoading = true;
+      _errorMessage = '';
+    });
     try {
       final snapshot = await _firestoreService.getStudentsOnce();
       if (!mounted) return;
@@ -480,7 +497,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
       await userRef.update({'points': FieldValue.increment(delta)});
 
       if (!mounted) return;
-      await _loadStudents();
+      await _loadStudents(showLoading: false);
       // _allStudents 갱신 후 _selectedStudent도 새 객체로 업데이트
       if (mounted) {
         setState(() {
@@ -510,7 +527,8 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
 
 
   bool _isProfileIncomplete(UserModel student) {
-    return student.studentId.isEmpty ||
+    return student.name.trim().isEmpty ||
+        student.studentId.isEmpty ||
         student.phoneNumber.isEmpty ||
         student.roomNumber == '000' ||
         student.dormBuilding == null ||
@@ -556,6 +574,12 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
       }
 
       final updateMap = <String, dynamic>{};
+      // 이름은 비어 있지 않더라도 엑셀 값으로 덮어쓴다(구글 로그인 시 영문명 등으로 저장된 경우 보정).
+      if (matched.name != null &&
+          matched.name!.isNotEmpty &&
+          matched.name != student.name) {
+        updateMap['name'] = matched.name;
+      }
       if (student.studentId.isEmpty && matched.studentId != null && matched.studentId!.isNotEmpty) {
         updateMap['studentId'] = matched.studentId;
       }
@@ -585,7 +609,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
       await _firestoreService.updateStudent(student.uid, updateMap);
 
       if (!mounted) return;
-      await _loadStudents();
+      await _loadStudents(showLoading: false);
       if (mounted) {
         setState(() {
           _selectedStudent = _allStudents.firstWhere((s) => s.uid == student.uid, orElse: () => student);
@@ -656,7 +680,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                     _selectedStudent = null;
                   }
                 });
-                await _loadStudents();
+                await _loadStudents(showLoading: false);
                 if (!mounted) return;
                 await displayInfoBar(
                   context,
@@ -692,11 +716,29 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
     final nicknameController = TextEditingController(text: student.nickname ?? '');
     final studentIdController = TextEditingController(text: student.studentId);
     final phoneController = TextEditingController(text: student.phoneNumber);
-    final roomController = TextEditingController(text: student.roomNumber);
     final seatNumberController = TextEditingController(text: student.seatNumber ?? '');
     final departmentController = TextEditingController(text: student.department ?? '');
     String? selectedDormBuilding = student.dormBuilding;
     String selectedResidentStatus = student.residentStatus;
+
+    // 호실 드롭다운(건물+동+층 → 호실 목록)용 초기 동/층을 기존 호실번호에서 역산한다.
+    final isIntlInit = selectedDormBuilding == '국제생활관';
+    String? selectedWing = isIntlInit
+        ? _getIntlWing(student.roomNumber)
+        : _getBuilding(student.roomNumber);
+    int? selectedFloor = isIntlInit
+        ? _getIntlFloor(student.roomNumber)
+        : _getFloor(student.roomNumber);
+    if (selectedWing == '') selectedWing = null;
+    if (selectedFloor == 0) selectedFloor = null;
+    String? selectedRoomNumber =
+        student.roomNumber.isNotEmpty && student.roomNumber != '000' ? student.roomNumber : null;
+    // 바롬인성교육관: 호실번호가 '1001-A' 형식이라 '-' 앞부분(호실 베이스)을 역산한다.
+    String? selectedBaromRoomBase = student.roomNumber.contains('-')
+        ? student.roomNumber.split('-').first
+        : null;
+    // 기타(바롬인성교육관 외 규칙 없는 건물)은 자유 텍스트로 입력한다.
+    final roomController = TextEditingController(text: student.roomNumber);
 
     showDialog(
       context: context,
@@ -762,12 +804,102 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                       ComboBoxItem(value: '바롬인성교육관', child: Text('바롬인성교육관')),
                       ComboBoxItem(value: '샬롬하우스(겨울방학)', child: Text('샬롬하우스(겨울방학)')),
                     ],
-                    onChanged: (v) => setDialogState(() => selectedDormBuilding = v),
+                    onChanged: (v) => setDialogState(() {
+                      selectedDormBuilding = v;
+                      selectedWing = null;
+                      selectedFloor = null;
+                      selectedRoomNumber = null;
+                      selectedBaromRoomBase = null;
+                    }),
                   ),
                   const SizedBox(height: 16),
                   const Text('호실', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
-                  TextBox(controller: roomController, placeholder: '호실을 입력하세요'),
+                  if (selectedDormBuilding == '샬롬하우스' ||
+                      selectedDormBuilding == '샬롬하우스(겨울방학)' ||
+                      selectedDormBuilding == '국제생활관') ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ComboBox<String>(
+                            value: selectedWing,
+                            isExpanded: true,
+                            placeholder: const Text('동'),
+                            items: const [
+                              ComboBoxItem(value: 'A', child: Text('A동')),
+                              ComboBoxItem(value: 'B', child: Text('B동')),
+                            ],
+                            onChanged: (v) => setDialogState(() {
+                              selectedWing = v;
+                              selectedFloor = null;
+                              selectedRoomNumber = null;
+                            }),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ComboBox<int>(
+                            value: selectedFloor,
+                            isExpanded: true,
+                            placeholder: const Text('층'),
+                            items: (selectedDormBuilding == '국제생활관'
+                                    ? const [1, 2, 3]
+                                    : const [2, 3, 4, 5, 6, 7])
+                                .map((f) => ComboBoxItem(value: f, child: Text('$f층')))
+                                .toList(),
+                            onChanged: (v) => setDialogState(() {
+                              selectedFloor = v;
+                              selectedRoomNumber = null;
+                            }),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ComboBox<String>(
+                            value: selectedRoomNumber,
+                            isExpanded: true,
+                            placeholder: const Text('호실'),
+                            items: _roomOptionsFor(selectedDormBuilding, selectedWing, selectedFloor)
+                                .map((r) => ComboBoxItem(value: r, child: Text('$r호')))
+                                .toList(),
+                            onChanged: (v) => setDialogState(() => selectedRoomNumber = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else if (selectedDormBuilding == '바롬인성교육관') ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ComboBox<String>(
+                            value: selectedBaromRoomBase,
+                            isExpanded: true,
+                            placeholder: const Text('호실'),
+                            items: _baromRoomBases
+                                .map((b) => ComboBoxItem(value: b, child: Text(b)))
+                                .toList(),
+                            onChanged: (v) => setDialogState(() {
+                              selectedBaromRoomBase = v;
+                              selectedRoomNumber = null;
+                            }),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ComboBox<String>(
+                            value: selectedRoomNumber,
+                            isExpanded: true,
+                            placeholder: const Text('자리'),
+                            items: _baromRoomOptionsFor(selectedBaromRoomBase)
+                                .map((r) => ComboBoxItem(value: r, child: Text(r)))
+                                .toList(),
+                            onChanged: (v) => setDialogState(() => selectedRoomNumber = v),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else
+                    TextBox(controller: roomController, placeholder: '호실을 입력하세요'),
                   const SizedBox(height: 16),
                   const Text('자리번호', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -841,6 +973,14 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
 
                 Navigator.pop(dialogContext);
 
+                final isDropdownRoomBuilding = selectedDormBuilding == '샬롬하우스' ||
+                    selectedDormBuilding == '샬롬하우스(겨울방학)' ||
+                    selectedDormBuilding == '국제생활관' ||
+                    selectedDormBuilding == '바롬인성교육관';
+                final resolvedRoomNumber = isDropdownRoomBuilding
+                    ? (selectedRoomNumber ?? '')
+                    : roomController.text.trim();
+
                 try {
                   await _firestoreService.updateStudent(student.uid, {
                     'name': nameController.text.trim(),
@@ -849,7 +989,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                         : nicknameController.text.trim(),
                     'studentId': studentIdController.text.trim(),
                     'phoneNumber': phoneController.text.trim(),
-                    'roomNumber': roomController.text.trim(),
+                    'roomNumber': resolvedRoomNumber,
                     'seatNumber': seatNumberController.text.trim().isEmpty
                         ? null
                         : seatNumberController.text.trim(),
@@ -858,11 +998,15 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                         : departmentController.text.trim(),
                     'dormBuilding': selectedDormBuilding,
                     'residentStatus': selectedResidentStatus,
+                    // 재실상태가 실제로 바뀐 경우에만 변경 시각을 남긴다.
+                    // (다른 정보만 수정할 때 기존 변경 이력이 덮어써지지 않도록)
+                    if (selectedResidentStatus != student.residentStatus)
+                      'residentStatusUpdatedAt': Timestamp.now(),
                   });
 
                   if (!mounted) return;
 
-                  await _loadStudents();
+                  await _loadStudents(showLoading: false);
                   if (!mounted) return;
                   setState(() {
                     _selectedStudent = _allStudents.firstWhere(
@@ -943,6 +1087,35 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
     if (n >= 233 && n <= 260) return 2;
     if (n >= 301 && n <= 329) return 3;
     return 0;
+  }
+
+  // 건물+동+층에 해당하는 유효 호실번호 목록을 생성한다 (학생 정보 수정 화면의 호실 드롭다운용).
+  // 샬롬하우스: A동 20개실(층×100+01~20), B동 15개실(층×100+21~35), 2~7층
+  // 국제생활관: A동 1층 101~132, A동 2층 201~229, B동 2층 233~260, B동 3층 301~329
+  List<String> _roomOptionsFor(String? dormBuilding, String? wing, int? floor) {
+    if (dormBuilding == null || wing == null || floor == null) return [];
+    final isIntl = dormBuilding == '국제생활관';
+    if (isIntl) {
+      if (wing == 'A' && floor == 1) return List.generate(32, (i) => '${101 + i}');
+      if (wing == 'A' && floor == 2) return List.generate(29, (i) => '${201 + i}');
+      if (wing == 'B' && floor == 2) return List.generate(28, (i) => '${233 + i}');
+      if (wing == 'B' && floor == 3) return List.generate(29, (i) => '${301 + i}');
+      return [];
+    }
+    // 샬롬하우스 / 샬롬하우스(겨울방학) 공통
+    if (floor < 2 || floor > 7) return [];
+    if (wing == 'A') return List.generate(20, (i) => '${floor * 100 + i + 1}');
+    if (wing == 'B') return List.generate(15, (i) => '${floor * 100 + 21 + i}');
+    return [];
+  }
+
+  // 바롬인성교육관: 1001/1002/1003 각 호실에 A/B/C 3개 자리(총 9개)가 있다.
+  static const _baromRoomBases = ['1001', '1002', '1003'];
+  static const _baromRoomSuffixes = ['A', 'B', 'C'];
+
+  List<String> _baromRoomOptionsFor(String? roomBase) {
+    if (roomBase == null) return [];
+    return _baromRoomSuffixes.map((s) => '$roomBase-$s').toList();
   }
 
   Widget _buildStatChip(BuildContext context, String label, int count, {bool isSelected = false, VoidCallback? onTap}) {
@@ -1691,6 +1864,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                                         ),
                                       )
                                     : ListView.builder(
+                                        controller: _listScrollController,
                                         padding: const EdgeInsets.all(16),
                                         itemCount: students.length,
                                         itemBuilder: (context, index) {
@@ -1700,7 +1874,11 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                                           }
                                           final student = entry.user!;
                                           final isSelected = _selectedStudent?.uid == student.uid;
-                                          final buildingColor = _buildingColor(student.dormBuilding);
+                                          // 퇴사자는 건물 색 대신 회색으로 표시해 재실자와 구분한다.
+                                          final buildingColor =
+                                              _isMoveOutStatus(student.residentStatus)
+                                                  ? Colors.grey
+                                                  : _buildingColor(student.dormBuilding);
                                           return Container(
                                             margin: const EdgeInsets.only(bottom: 8),
                                             decoration: BoxDecoration(
@@ -1745,17 +1923,24 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                                               ),
                                               title: Row(
                                                 children: [
-                                                  Text(
-                                                    student.name,
-                                                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
+                                                  // 상태 배지와 퇴사일시가 잘리지 않도록 이름/별명 쪽이 먼저 줄어든다.
+                                                  Flexible(
+                                                    child: Text(
+                                                      student.name,
+                                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
                                                   ),
                                                   if (student.nickname != null && student.nickname!.isNotEmpty) ...[
                                                     const SizedBox(width: 6),
-                                                    Text(
-                                                      '(${student.nickname})',
-                                                      style: TextStyle(fontSize: 12, color: Colors.grey[100]),
+                                                    Flexible(
+                                                      child: Text(
+                                                        '(${student.nickname})',
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow.ellipsis,
+                                                        style: TextStyle(fontSize: 12, color: Colors.grey[100]),
+                                                      ),
                                                     ),
                                                   ],
                                                   if (student.residentStatus.isNotEmpty &&
@@ -1776,6 +1961,23 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                                                         ),
                                                       ),
                                                     ),
+                                                    // 퇴사자는 상태 배지 옆에 퇴사 처리 일시를 보여준다.
+                                                    if (_isMoveOutStatus(student.residentStatus)) ...[
+                                                      const SizedBox(width: 6),
+                                                      Icon(FluentIcons.clock,
+                                                          size: 10, color: Colors.grey[100]),
+                                                      const SizedBox(width: 3),
+                                                      Text(
+                                                        student.residentStatusUpdatedAt != null
+                                                            ? _statusChangedFormat
+                                                                .format(student.residentStatusUpdatedAt!)
+                                                            : '퇴사일시 미기록',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors.grey[100],
+                                                        ),
+                                                      ),
+                                                    ],
                                                   ],
                                                 ],
                                               ),
@@ -2054,6 +2256,22 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                                                     ),
                                                   ),
                                                 ),
+                                                // 상태가 변경된 일시 (기록이 있는 경우에만)
+                                                if (_selectedStudent!.residentStatus != '재실중' &&
+                                                    _selectedStudent!.residentStatusUpdatedAt != null) ...[
+                                                  const SizedBox(width: 8),
+                                                  Icon(FluentIcons.clock,
+                                                      size: 12, color: Colors.grey[100]),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    _statusChangedFormat.format(
+                                                        _selectedStudent!.residentStatusUpdatedAt!),
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.grey[100],
+                                                    ),
+                                                  ),
+                                                ],
                                               ],
                                             ),
                                           ),

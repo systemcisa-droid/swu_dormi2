@@ -6,6 +6,7 @@ import 'package:swu_dormi_admin/widgets/shimmer.dart';
 import 'package:swu_dormi_admin/services/firestore_service.dart';
 import 'package:swu_dormi_admin/services/storage_service.dart';
 import 'package:swu_dormi_admin/models/notice_model.dart';
+import 'package:swu_dormi_admin/widgets/linkified_text.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_notice_create_screen.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_monthly_plan_screen.dart';
 import 'package:intl/intl.dart';
@@ -439,8 +440,8 @@ class _WindowsNoticesScreenState extends State<WindowsNoticesScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SelectableText(
-                    _selectedNotice!.content,
+                  LinkifiedText(
+                    text: _selectedNotice!.content,
                     style: const TextStyle(
                       fontSize: 14,
                       height: 1.6,
@@ -777,6 +778,8 @@ class _PopupNoticeDialogState extends State<_PopupNoticeDialog> {
   }
 
   Future<void> _save() async {
+    // 처리 중 재진입(중복 저장) 방지
+    if (_isSaving) return;
     if (_isEnabled && _titleController.text.trim().isEmpty) {
       await displayInfoBar(
         context,

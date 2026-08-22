@@ -16,6 +16,8 @@ class StudentModel {
   final int points;
   final DateTime createdAt;
   final String residentStatus;
+  // 재실상태를 마지막으로 변경한 시각. 이 기능 도입 전 기록은 null이다.
+  final DateTime? residentStatusUpdatedAt;
 
   StudentModel({
     required this.id,
@@ -33,7 +35,17 @@ class StudentModel {
     this.points = 0,
     required this.createdAt,
     this.residentStatus = '재실중',
+    this.residentStatusUpdatedAt,
   });
+
+  /// Timestamp / ISO 문자열 어느 형식으로 저장돼 있어도 안전하게 읽는다.
+  static DateTime? _parseDateTime(dynamic v) {
+    if (v == null) return null;
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    if (v is String) return DateTime.tryParse(v);
+    return null;
+  }
 
   factory StudentModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -68,6 +80,7 @@ class StudentModel {
       points: (data['points'] as num?)?.toInt() ?? 0,
       createdAt: parseCreatedAt(data['createdAt']),
       residentStatus: (data['residentStatus'] as String?) ?? '재실중',
+      residentStatusUpdatedAt: _parseDateTime(data['residentStatusUpdatedAt']),
     );
   }
 
@@ -84,6 +97,8 @@ class StudentModel {
       if (seatNumber != null) 'seatNumber': seatNumber,
       'dormBuilding': dormBuilding,
       'residentStatus': residentStatus,
+      if (residentStatusUpdatedAt != null)
+        'residentStatusUpdatedAt': Timestamp.fromDate(residentStatusUpdatedAt!),
       'profileImageUrl': profileImageUrl,
       'points': points,
       'createdAt': Timestamp.fromDate(createdAt),

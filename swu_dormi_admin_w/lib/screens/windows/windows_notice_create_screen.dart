@@ -120,6 +120,8 @@ class _WindowsNoticeCreateScreenState extends State<WindowsNoticeCreateScreen> {
   }
 
   Future<void> _saveNotice() async {
+    // 처리 중 재진입(중복 등록) 방지
+    if (_isLoading) return;
     if (_titleController.text.trim().isEmpty || _contentController.text.trim().isEmpty) {
       displayInfoBar(
         context,

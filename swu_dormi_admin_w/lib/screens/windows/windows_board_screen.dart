@@ -40,6 +40,7 @@ class _WindowsBoardScreenState extends State<WindowsBoardScreen> {
     {'value': '물품 나눔', 'label': '물품 나눔(당근)'},
     {'value': '정보 알림', 'label': '정보 알림'},
     {'value': '세탁실톡', 'label': '세탁실톡'},
+    {'value': '맛집', 'label': '맛집'},
   ];
 
   Color _categoryColor(String? cat) {
@@ -54,6 +55,8 @@ class _WindowsBoardScreenState extends State<WindowsBoardScreen> {
         return Colors.blue;
       case '세탁실톡':
         return Colors.purple;
+      case '맛집':
+        return Colors.teal;
       default:
         return Colors.grey;
     }

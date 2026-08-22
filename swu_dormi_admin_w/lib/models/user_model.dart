@@ -17,6 +17,8 @@ class UserModel {
   final DateTime createdAt;
   final int points;
   final String residentStatus; // 재실중, 바롬인성교육관, 퇴사
+  // 재실상태를 마지막으로 변경한 시각. 이 기능 도입 전에 변경된 기록은 null이다.
+  final DateTime? residentStatusUpdatedAt;
 
   UserModel({
     required this.uid,
@@ -35,6 +37,7 @@ class UserModel {
     required this.createdAt,
     this.points = 0,
     this.residentStatus = '재실중',
+    this.residentStatusUpdatedAt,
   });
 
   // 호실번호로부터 동 계산 (201~220: A동, 221~240: B동)
@@ -105,7 +108,19 @@ class UserModel {
       'createdAt': createdAt.toIso8601String(),
       'points': points,
       'residentStatus': residentStatus,
+      'residentStatusUpdatedAt': residentStatusUpdatedAt != null
+          ? Timestamp.fromDate(residentStatusUpdatedAt!)
+          : null,
     };
+  }
+
+  // Timestamp / ISO 문자열 어느 형식으로 저장돼 있어도 안전하게 읽는다.
+  static DateTime? _parseDateTime(dynamic v) {
+    if (v == null) return null;
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    if (v is String) return DateTime.tryParse(v);
+    return null;
   }
 
   factory UserModel.fromMap(Map<String, dynamic> map) {
@@ -128,6 +143,7 @@ class UserModel {
           : DateTime.now(),
       points: (map['points'] as num?)?.toInt() ?? 0,
       residentStatus: (map['residentStatus'] as String?) ?? '재실중',
+      residentStatusUpdatedAt: _parseDateTime(map['residentStatusUpdatedAt']),
     );
   }
 
@@ -167,6 +183,7 @@ class UserModel {
       createdAt: parseCreatedAt(data['createdAt']),
       points: (data['points'] as num?)?.toInt() ?? 0,
       residentStatus: (data['residentStatus'] as String?) ?? '재실중',
+      residentStatusUpdatedAt: _parseDateTime(data['residentStatusUpdatedAt']),
     );
   }
 }

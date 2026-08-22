@@ -27,6 +27,10 @@ class _RoomInspectionHistoryContentState
 
   Map<String, Map<String, dynamic>> _scheduleMap = {};
   bool _isLoading = true;
+  // 대리 신청 등으로 목록을 다시 불러와도 보고 있던 위치를 유지한다.
+  final _listScrollController = ScrollController();
+  // 우측 상세 패널(선택한 호실의 점검 이력)용 스크롤 위치
+  final _detailScrollController = ScrollController();
 
   // requestId -> inspectionType (scheduleMap 조인 결과 캐시)
   Map<String, String> _requestInspectionType = {};
@@ -41,10 +45,15 @@ class _RoomInspectionHistoryContentState
   Set<String> _vacantRoomKeys = {};
   // 호실 키('건물|호실') → 현재 거주 인원 수
   Map<String, int> _residentCountByRoom = {};
+  // '건물|호실' → 재실중인 학생 목록 [{uid, name, seatNumber}] : 월검사 대리신청 시 신청자 선택용
+  Map<String, List<Map<String, String>>> _residentsByRoom = {};
+  // 관리자 대리 신청 처리 중 여부 — 연타로 중복 신청되는 것을 막는다.
+  bool _isApplyingByAdmin = false;
 
   String _searchQuery = '';
   String? _selectedRoom;
-  String? _floorFilter;
+  // 초기 로딩 부담을 줄이기 위해 전체가 아닌 기본 구역으로 시작한다(전체는 사용자가 직접 선택).
+  String? _floorFilter = kDefaultFloorFilter;
   // 스케줄 필터 값: 'sid:신청' 또는 'sid:미신청'
   String? _scheduleFilter;
 
@@ -71,14 +80,18 @@ class _RoomInspectionHistoryContentState
   @override
   void dispose() {
     _searchController.dispose();
+    _listScrollController.dispose();
+    _detailScrollController.dispose();
     super.dispose();
   }
 
   String _errorMessage = '';
 
-  Future<void> _loadData() async {
+  /// [showLoading]이 false면 로딩 화면으로 교체하지 않고 조용히 갱신한다.
+  /// (대리 신청 후 재조회 시 목록이 사라졌다 다시 그려지며 스크롤이 초기화되는 것을 막는다)
+  Future<void> _loadData({bool showLoading = true}) async {
     setState(() {
-      _isLoading = true;
+      if (showLoading) _isLoading = true;
       _errorMessage = '';
     });
     try {
@@ -113,6 +126,7 @@ class _RoomInspectionHistoryContentState
       // 재실중인 학생이 있는 '건물|호실' 키 집합 (거주학생 없음 판정용)
       final occupiedRoomKeys = <String>{};
       final residentCountByRoom = <String, int>{};
+      final residentsByRoom = <String, List<Map<String, String>>>{};
       for (final doc in usersSnap.docs) {
         final data = doc.data();
         final seatNumber = data['seatNumber']?.toString();
@@ -133,6 +147,13 @@ class _RoomInspectionHistoryContentState
           final roomKey = '$dormBuilding|$roomNumber';
           occupiedRoomKeys.add(roomKey);
           residentCountByRoom[roomKey] = (residentCountByRoom[roomKey] ?? 0) + 1;
+          if (data['role']?.toString() == 'student') {
+            residentsByRoom.putIfAbsent(roomKey, () => []).add({
+              'uid': doc.id,
+              'name': data['name']?.toString() ?? '',
+              'seatNumber': seatNumber ?? '',
+            });
+          }
         }
 
         final String floorNum;
@@ -393,6 +414,7 @@ class _RoomInspectionHistoryContentState
           _personInfoByKey = personInfoByKey;
           _vacantRoomKeys = vacantRoomKeys;
           _residentCountByRoom = residentCountByRoom;
+          _residentsByRoom = residentsByRoom;
           _isLoading = false;
         });
       }
@@ -1132,6 +1154,7 @@ class _RoomInspectionHistoryContentState
     }
 
     return ListView.builder(
+      controller: _listScrollController,
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
       itemCount: rooms.length,
       itemBuilder: (context, index) {
@@ -1186,6 +1209,10 @@ class _RoomInspectionHistoryContentState
       final sid = d['scheduleId']?.toString();
       return sid != null && _scheduleMap.containsKey(sid);
     });
+    // 월검사: 스케줄이 삭제되면 그 신청 이력은 무효로 보고 미신청으로 되돌린다.
+    // (퇴사검사는 스케줄과 무관하게 이력 자체로 판단한다)
+    final showAsUnapplied =
+        isMonthlyCard ? !hasActiveScheduleRequest : requests.isEmpty;
 
     final isSelected = _selectedRoom == key;
     final accentColor = FluentTheme.of(context).accentColor;
@@ -1426,8 +1453,8 @@ class _RoomInspectionHistoryContentState
                             style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey[130]),
                           ),
                         )
-                      else if (requests.isEmpty)
-                        // 이력 없음 → 미신청
+                      else if (showAsUnapplied)
+                        // 이력 없음(또는 스케줄 삭제됨) → 미신청
                         Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -1452,8 +1479,27 @@ class _RoomInspectionHistoryContentState
                                     const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                   ),
                                 ),
-                                onPressed: () => _showApplyScheduleDialog(key, personUid),
+                                onPressed: _isApplyingByAdmin
+                                    ? null
+                                    : () => _showApplyScheduleDialog(key, personUid),
                                 child: const Text('관리자신청', style: TextStyle(fontSize: 11)),
+                              ),
+                            ]
+                            // 월검사(호실 단위)는 그룹 키에 uid가 없으므로 호실의 재실 학생 중
+                            // 대표 신청자를 골라 기존 스케줄에 대리 신청한다.
+                            else if (personUid == null &&
+                                (_residentsByRoom[key]?.isNotEmpty ?? false)) ...[
+                              const SizedBox(width: 6),
+                              Button(
+                                style: ButtonStyle(
+                                  padding: WidgetStateProperty.all(
+                                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  ),
+                                ),
+                                onPressed: _isApplyingByAdmin
+                                    ? null
+                                    : () => _showMonthlyApplyFlow(key),
+                                child: const Text('기간외신청', style: TextStyle(fontSize: 11)),
                               ),
                             ],
                           ],
@@ -1492,14 +1538,103 @@ class _RoomInspectionHistoryContentState
   }
 
   // ── 관리자 대리 신청 ──
-  Future<void> _showApplyScheduleDialog(String key, String? uid) async {
+  /// 월검사 대리 신청: 월검사는 호실 단위이므로 그룹 키에 uid가 없다.
+  /// 해당 호실의 재실 학생 중 신청자를 고른 뒤(1명이면 자동 선택) 스케줄 선택으로 넘어간다.
+  Future<void> _showMonthlyApplyFlow(String key) async {
+    final residents = _residentsByRoom[key] ?? const <Map<String, String>>[];
+    if (residents.isEmpty) {
+      await showDialog(
+        context: context,
+        builder: (ctx) => ContentDialog(
+          title: const Text('알림'),
+          content: const Text('이 호실에 재실중인 학생이 없어 대리 신청할 수 없습니다'),
+          actions: [
+            FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인')),
+          ],
+        ),
+      );
+      return;
+    }
+
+    String? uid;
+    if (residents.length == 1) {
+      uid = residents.first['uid'];
+    } else {
+      // 신청 문서는 학생 1명 기준으로 저장되므로 대표 신청자를 지정받는다.
+      await showDialog(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => ContentDialog(
+            title: const Text('신청자 선택'),
+            content: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '월검사 신청은 학생 1명 기준으로 접수됩니다. 대표 신청자를 선택해주세요.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey[120]),
+                  ),
+                  const SizedBox(height: 12),
+                  ...residents.map((r) {
+                    final seat = (r['seatNumber'] ?? '').isNotEmpty
+                        ? ' (자리 ${r['seatNumber']})'
+                        : '';
+                    final isSelected = uid == r['uid'];
+                    return ListTile(
+                      title: Text('${r['name']}$seat'),
+                      tileColor: isSelected
+                          ? WidgetStateProperty.all(
+                              FluentTheme.of(context).accentColor.withValues(alpha: 0.15))
+                          : null,
+                      onPressed: () => setDialogState(() => uid = r['uid']),
+                    );
+                  }),
+                ],
+              ),
+            ),
+            actions: [
+              Button(onPressed: () {
+                uid = null;
+                Navigator.pop(ctx);
+              }, child: const Text('취소')),
+              FilledButton(
+                onPressed: uid == null ? null : () => Navigator.pop(ctx),
+                child: const Text('다음'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (uid == null || !mounted) return;
+    await _showApplyScheduleDialog(key, uid, inspectionType: 'monthly');
+  }
+
+  /// 관리자 대리 신청. [inspectionType]이 'move_out'이면 퇴사검사, 'monthly'면 월검사 스케줄을 보여준다.
+  Future<void> _showApplyScheduleDialog(
+    String key,
+    String? uid, {
+    String inspectionType = 'move_out',
+  }) async {
     if (uid == null) return;
+    final isMonthlyApply = inspectionType == 'monthly';
+    final typeLabel = isMonthlyApply ? '기간외신청' : '퇴사검사';
 
     final roomFloor = _getRoomFloorOption(key);
     final schedules = _scheduleMap.entries
-        .where((e) =>
-            e.value['inspectionType'] == 'move_out' &&
-            (roomFloor == null || e.value['floor'] == roomFloor))
+        .where((e) {
+          // 월검사 스케줄은 inspectionType이 없는 레거시 데이터도 monthly로 취급한다.
+          final t = e.value['inspectionType']?.toString();
+          final matchesType =
+              isMonthlyApply ? (t == null || t == 'monthly') : t == 'move_out';
+          if (!matchesType) return false;
+          // 월검사 대리 신청은 '기간외신청'으로 만든 일정만 대상으로 한다.
+          if (isMonthlyApply && e.value['adminOnly'] != true) return false;
+          return roomFloor == null || e.value['floor'] == roomFloor;
+        })
         .toList()
       ..sort((a, b) {
         final ta = (a.value['date'] as Timestamp?)?.toDate();
@@ -1518,8 +1653,8 @@ class _RoomInspectionHistoryContentState
           title: const Text('알림'),
           content: Text(
             roomFloor != null
-                ? '$roomFloor 구역에 등록된 퇴사검사 스케줄이 없습니다'
-                : '등록된 퇴사검사 스케줄이 없습니다',
+                ? '$roomFloor 구역에 등록된 $typeLabel 스케줄이 없습니다'
+                : '등록된 $typeLabel 스케줄이 없습니다',
           ),
           actions: [
             FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('확인')),
@@ -1534,7 +1669,7 @@ class _RoomInspectionHistoryContentState
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => ContentDialog(
-          title: const Text('스케줄 선택'),
+          title: Text('$typeLabel 스케줄 선택'),
           content: SizedBox(
             width: 400,
             child: ListView.builder(
@@ -1572,10 +1707,19 @@ class _RoomInspectionHistoryContentState
     );
 
     if (selectedId == null || !mounted) return;
-    await _submitApplyByAdmin(key, uid, selectedId!);
+    await _submitApplyByAdmin(key, uid, selectedId!,
+        inspectionType: inspectionType);
   }
 
-  Future<void> _submitApplyByAdmin(String key, String uid, String scheduleId) async {
+  Future<void> _submitApplyByAdmin(
+    String key,
+    String uid,
+    String scheduleId, {
+    String inspectionType = 'move_out',
+  }) async {
+    // 처리 중 재진입(중복 신청) 방지
+    if (_isApplyingByAdmin) return;
+    setState(() => _isApplyingByAdmin = true);
     try {
       final scheduleData = _scheduleMap[scheduleId];
       if (scheduleData == null) throw Exception('스케줄 정보 없음');
@@ -1609,7 +1753,9 @@ class _RoomInspectionHistoryContentState
         'roomNumber': userData['roomNumber'] ?? '',
         'dormBuilding': dormBuilding,
         'scheduleId': scheduleId,
-        'inspectionType': 'move_out',
+        'inspectionType': inspectionType,
+        // 스케줄이 삭제돼도 기간외신청 건임을 알 수 있도록 신청 문서에도 남긴다.
+        if (scheduleData['adminOnly'] == true) 'adminOnly': true,
         'availableDates': [Timestamp.fromDate(scheduleDate)],
         'availableTimeSlot': '$startTime~$endTime',
         'availableTimeSlotLabel': '${DateFormat('MM/dd').format(scheduleDate)} $startTime~$endTime',
@@ -1638,7 +1784,7 @@ class _RoomInspectionHistoryContentState
             ],
           ),
         );
-        await _loadData();
+        await _loadData(showLoading: false);
       }
     } catch (e) {
       if (mounted) {
@@ -1653,6 +1799,8 @@ class _RoomInspectionHistoryContentState
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isApplyingByAdmin = false);
     }
   }
 
@@ -1763,6 +1911,7 @@ class _RoomInspectionHistoryContentState
                     ),
                   )
                 : ListView.builder(
+                    controller: _detailScrollController,
                     padding: const EdgeInsets.all(16),
                     itemCount: requests.length,
                     itemBuilder: (context, index) {
@@ -2054,12 +2203,33 @@ class _RoomInspectionHistoryContentState
                 data['inspectionType'] ??
                 'monthly')
             as String;
-    final scheduleDate = (scheduleData?['date'] as Timestamp?)?.toDate();
-    final scheduleStartTime = scheduleData?['startTime'] as String?;
-    final scheduleEndTime = scheduleData?['endTime'] as String?;
+    // 스케줄이 삭제되어도 검사일시를 유지하기 위해 신청 문서에 저장된 값으로 폴백한다.
+    // (availableDates: 검사일 배열, availableTimeSlot: 'HH:MM~HH:MM')
+    final fallbackDates = data['availableDates'];
+    final fallbackDate = (fallbackDates is List && fallbackDates.isNotEmpty)
+        ? (fallbackDates.first is Timestamp
+            ? (fallbackDates.first as Timestamp).toDate()
+            : null)
+        : null;
+    final scheduleDate =
+        (scheduleData?['date'] as Timestamp?)?.toDate() ?? fallbackDate;
+
+    final fallbackSlot = (data['availableTimeSlot'] as String?) ?? '';
+    final fallbackSlotParts = fallbackSlot.split('~');
+    final scheduleStartTime = (scheduleData?['startTime'] as String?) ??
+        (fallbackSlotParts.isNotEmpty && fallbackSlotParts[0].isNotEmpty
+            ? fallbackSlotParts[0]
+            : null);
+    final scheduleEndTime = (scheduleData?['endTime'] as String?) ??
+        (fallbackSlotParts.length > 1 && fallbackSlotParts[1].isNotEmpty
+            ? fallbackSlotParts[1]
+            : null);
 
     final isMoveOut = inspectionType == 'move_out';
     final inspectionTypeLabel = isMoveOut ? '퇴사검사' : '월검사';
+    // 기간외신청 일정 여부. 스케줄이 삭제된 경우 신청 문서에 남긴 값으로 폴백한다.
+    final isAdminOnly =
+        (scheduleData?['adminOnly'] ?? data['adminOnly']) == true;
 
     final statusColor = _statusColor(status);
     final statusLabel = _statusLabel(status);
@@ -2213,28 +2383,54 @@ class _RoomInspectionHistoryContentState
                   ),
                   const SizedBox(width: 12),
                 ],
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.teal.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(4),
-                    border: Border.all(
-                      color: Colors.teal.withValues(alpha: 0.3),
+                // 기간외신청 건은 '기간외' 배지로 대체하므로 유형 배지를 생략한다.
+                if (isMoveOut || !isAdminOnly)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: Colors.teal.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Text(
+                      inspectionTypeLabel,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.teal,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                  child: Text(
-                    inspectionTypeLabel,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.teal,
-                      fontWeight: FontWeight.w500,
+                // 기간외신청 일정으로 접수된 건(일반검사는 배지 없음)
+                if (!isMoveOut && isAdminOnly)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: Colors.purple.withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Text(
+                      '기간외',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.purple,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                ),
-                if (scheduleDate != null) ...[
+                // 점검이 완료되면 첫 줄에 검사일시가 이미 표시되므로 중복 날짜는 그리지 않는다.
+                if (scheduleDate != null && status != 'completed') ...[
                   const SizedBox(width: 10),
                   Text(
                     DateFormat('yyyy.MM.dd').format(scheduleDate),
@@ -2300,6 +2496,27 @@ class _RoomInspectionHistoryContentState
                   ),
                 );
               }(),
+            ],
+            // 대리점검: 검사 당일 신청자 대신 입회한 학생
+            if (data['isProxyInspection'] == true) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(FluentIcons.contact, size: 13, color: Colors.purple),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      '대리점검: ${(data['proxyUserName'] as String?) ?? ''}'
+                      '${(data['proxyRoomNumber'] as String?)?.isNotEmpty == true ? ' (${data['proxyRoomNumber']}호)' : ''}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.purple,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
             if (comment != null && comment.isNotEmpty) ...[
               const SizedBox(height: 8),

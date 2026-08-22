@@ -389,6 +389,8 @@ class _InternNoticeDialogState extends State<_InternNoticeDialog> {
   }
 
   Future<void> _submit() async {
+    // 처리 중 재진입(중복 등록) 방지
+    if (_isLoading) return;
     final title = _titleCtrl.text.trim();
     final content = _contentCtrl.text.trim();
     if (title.isEmpty || content.isEmpty) {
@@ -457,12 +459,14 @@ class _InternNoticeDialogState extends State<_InternNoticeDialog> {
           children: [
             TextBox(
               controller: _titleCtrl,
+              enabled: !_isLoading,
               placeholder: '제목',
               maxLines: 1,
             ),
             const SizedBox(height: 12),
             TextBox(
               controller: _contentCtrl,
+              enabled: !_isLoading,
               placeholder: '내용을 입력하세요.',
               maxLines: 10,
               minLines: 6,

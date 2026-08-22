@@ -29,6 +29,8 @@ class _WindowsLoginScreenState extends State<WindowsLoginScreen> {
   }
 
   Future<void> _handleLogin() async {
+    // 처리 중 재진입(중복 로그인) 방지
+    if (_isLoading) return;
     if (_emailIdController.text.isEmpty || _passwordController.text.isEmpty) {
       setState(() {
         _errorMessage = '이메일과 비밀번호를 모두 입력해주세요';

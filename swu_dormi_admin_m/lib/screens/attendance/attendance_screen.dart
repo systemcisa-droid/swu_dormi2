@@ -46,8 +46,8 @@ class _AttendanceScreenState extends State<AttendanceScreen>
           unselectedLabelColor: Colors.white70,
           indicatorColor: Colors.white,
           tabs: const [
-            Tab(icon: Icon(Icons.event, size: 18), text: '출석 이벤트'),
-            Tab(icon: Icon(Icons.history, size: 18), text: '출석 이력'),
+            Tab(icon: Icon(Icons.event, size: 18), text: '인원점검'),
+            Tab(icon: Icon(Icons.history, size: 18), text: '인원점검 이력'),
           ],
         ),
       ),
@@ -75,7 +75,11 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
 
   String? _assignedFloor;
   bool _isLoadingEvents = true;
+  // 스케줄 생성/종료 후 목록을 다시 불러와도 보고 있던 위치를 유지한다.
+  final _eventScrollController = ScrollController();
   bool _isLoadingRecords = false;
+  // 스케줄 종료 처리 중 여부 — 연타로 중복 실행되는 것을 막는다.
+  bool _isClosingEvents = false;
   List<Map<String, dynamic>> _events = [];
   List<Map<String, dynamic>> _records = [];
   List<Map<String, dynamic>> _roomStudents = [];
@@ -92,6 +96,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
   Map<String, int> _roomStudentCounts = {};
   // 구역(kFloorOptions 값) -> 재실 학생 수 (구역 전체 통합 이벤트 카드용)
   Map<String, int> _floorStudentCounts = {};
+  // 화재대피용 이벤트별 QR 스캔 모드: eventId → true(대피 도착 확인)/false(대피 시작 확인, 기본값)
+  final Map<String, bool> _fireDrillArrivalMode = {};
 
   // 층장 상태 (부재/외박미수정, 로컬 즉시 반영용): userId → 상태
   final Map<String, String?> _floorStatuses = {};
@@ -180,28 +186,49 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
             (e) => e['id'] == _selectedEventId,
             orElse: () => {},
           );
+          final eventFloor = event['floor'] as String?;
           _updateRoomUnregisteredStudents(
             event['roomNumber'] as String?,
             isFloorWide: event['isFloorWide'] == true,
             floorRoomNumbers: null,
+            dormBuilding: (eventFloor != null && eventFloor.isNotEmpty)
+                ? _dormBuildingOf(eventFloor)
+                : (_assignedFloor != null ? _dormBuildingOf(_assignedFloor!) : null),
           );
         }
       });
     } catch (_) {}
   }
 
+  /// 구역 문자열(예: '국제생활관 A동 2층')에서 기숙사 건물명을 뽑는다.
+  static String? _dormBuildingOf(String floor) =>
+      floor.contains('겨울방학') ? '샬롬하우스(겨울방학)' : floor.split(' ').firstOrNull;
+
   void _updateRoomUnregisteredStudents(
     String? roomNumber, {
     bool isFloorWide = false,
     Set<String>? floorRoomNumbers,
+    String? dormBuilding,
   }) {
+    // 호실번호는 기숙사 간 중복되므로(예: 샬롬하우스 206호 / 국제생활관 206호)
+    // 가입 학생 조회와 동일하게 건물까지 일치해야 같은 구역으로 취급한다.
+    bool matchesBuilding(ExcelStudentRow s) {
+      if (dormBuilding == null || dormBuilding.isEmpty) return true;
+      // 엑셀에 건물이 비어 있으면 판별할 수 없으므로 제외하지 않고 남긴다.
+      if (s.dormBuilding == null || s.dormBuilding!.isEmpty) return true;
+      return s.dormBuilding == dormBuilding;
+    }
+
     if (isFloorWide) {
       if (floorRoomNumbers == null || floorRoomNumbers.isEmpty) {
         _roomUnregisteredStudents = [];
         return;
       }
       _roomUnregisteredStudents = _unregisteredStudents
-          .where((s) => s.roomNumber != null && floorRoomNumbers.contains(s.roomNumber))
+          .where((s) =>
+              s.roomNumber != null &&
+              floorRoomNumbers.contains(s.roomNumber) &&
+              matchesBuilding(s))
           .toList();
       return;
     }
@@ -209,8 +236,9 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       _roomUnregisteredStudents = [];
       return;
     }
-    _roomUnregisteredStudents =
-        _unregisteredStudents.where((s) => s.roomNumber == roomNumber).toList();
+    _roomUnregisteredStudents = _unregisteredStudents
+        .where((s) => s.roomNumber == roomNumber && matchesBuilding(s))
+        .toList();
   }
 
   Future<void> _loadAssignedFloorThenEvents() async {
@@ -223,8 +251,12 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     _loadEvents();
   }
 
-  Future<void> _loadEvents() async {
-    setState(() => _isLoadingEvents = true);
+  /// [showLoading]이 false면 로딩 화면으로 교체하지 않고 조용히 갱신한다.
+  /// (생성/종료 후 재조회 시 목록이 사라졌다 다시 그려지며 스크롤이 초기화되는 것을 막는다)
+  Future<void> _loadEvents({bool showLoading = true}) async {
+    setState(() {
+      if (showLoading) _isLoadingEvents = true;
+    });
     try {
       Query query = _firestore
           .collection('attendance_events')
@@ -258,11 +290,13 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         return aRoom.compareTo(bRoom);
       });
 
-      // 이벤트별 출석 카운트 집계
+      // 이벤트별 출석 카운트 집계 (화재대피용 1차 스캔만 한 미완료 기록은 제외)
       final recordsSnap = await _firestore.collection('attendance_records').get();
       final counts = <String, int>{};
       for (final doc in recordsSnap.docs) {
-        final eid = doc.data()['eventId'] as String?;
+        final data = doc.data();
+        if (data['isComplete'] == false) continue;
+        final eid = data['eventId'] as String?;
         if (eid != null) counts[eid] = (counts[eid] ?? 0) + 1;
       }
 
@@ -304,7 +338,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         _isLoadingEvents = false;
       });
     } catch (e) {
-      debugPrint('출석 이벤트 로딩 오류: $e');
+      debugPrint('인원점검 로딩 오류: $e');
       if (mounted) {
         setState(() => _isLoadingEvents = false);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -339,17 +373,14 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
 
     try {
       // 호실 학생 로드 (1회) — dormBuilding 필터로 같은 호실번호의 타 기숙사 학생 제외
-      final dormBuilding = _assignedFloor != null
-          ? (_assignedFloor!.contains('겨울방학')
-              ? '샬롬하우스(겨울방학)'
-              : _assignedFloor!.split(' ').firstOrNull)
-          : null;
+      final dormBuilding =
+          _assignedFloor != null ? _dormBuildingOf(_assignedFloor!) : null;
       List<Map<String, dynamic>> students = [];
-      List<String> floorOccupiedRooms = [];
+      List<String> floorAllRooms = [];
       if (isFloorWide && eventFloor != null && eventFloor.isNotEmpty) {
         final result = await _loadStudentsForFloor(eventFloor);
         students = result.students;
-        floorOccupiedRooms = result.occupiedRooms;
+        floorAllRooms = result.allRoomNumbers;
       } else if (roomNumber != null && roomNumber.isNotEmpty) {
         Query<Map<String, dynamic>> q = _firestore
             .collection('users')
@@ -384,7 +415,11 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         _updateRoomUnregisteredStudents(
           roomNumber,
           isFloorWide: isFloorWide,
-          floorRoomNumbers: floorOccupiedRooms.toSet(),
+          floorRoomNumbers: floorAllRooms.toSet(),
+          // 구역 전체 이벤트는 이벤트의 구역에서, 호실별은 담당 구역에서 건물을 판별한다.
+          dormBuilding: isFloorWide && eventFloor != null && eventFloor.isNotEmpty
+              ? _dormBuildingOf(eventFloor)
+              : dormBuilding,
         );
         savedFloorStatuses.forEach((uid, st) {
           _floorStatuses[uid] = st as String?;
@@ -412,7 +447,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         });
       });
     } catch (e) {
-      debugPrint('출석 기록 로딩 오류: $e');
+      debugPrint('임원점검 기록 로딩 오류: $e');
       if (mounted) setState(() => _isLoadingRecords = false);
     }
   }
@@ -420,6 +455,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
   @override
   void dispose() {
     _recordsSubscription?.cancel();
+    _eventScrollController.dispose();
     super.dispose();
   }
 
@@ -459,7 +495,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showCreateEventDialog,
         icon: const Icon(Icons.add),
-        label: const Text('출석 추가'),
+        label: const Text('인원점검 추가'),
       ),
       body: Column(
         children: [
@@ -543,6 +579,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
 
   Future<void> _closeSelectedEvents() async {
     if (_selectedEventIds.isEmpty) return;
+    // 처리 중 재진입(중복 종료) 방지
+    if (_isClosingEvents) return;
     final count = _selectedEventIds.length;
     final result = await showDialog<bool>(
       context: context,
@@ -571,7 +609,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         _selectedEventIds.clear();
         _isSelectionMode = false;
       });
-      _loadEvents();
+      _loadEvents(showLoading: false);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -595,14 +633,14 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           Icon(Icons.event_available, size: 64, color: Colors.grey.shade400),
           const SizedBox(height: 16),
           Text(
-            '등록된 출석 이벤트가 없습니다',
+            '등록된 인원점검 스케줄이 없습니다',
             style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: _showCreateEventDialog,
             icon: const Icon(Icons.add),
-            label: const Text('이벤트 추가'),
+            label: const Text('인원점검 추가'),
           ),
         ],
       ),
@@ -613,6 +651,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     return RefreshIndicator(
       onRefresh: _loadAssignedFloorThenEvents,
       child: ListView.builder(
+        controller: _eventScrollController,
         padding: const EdgeInsets.all(16),
         itemCount: _events.length,
         itemBuilder: (context, index) => _buildEventCard(_events[index]),
@@ -629,6 +668,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     final roomNumber = event['roomNumber'] as String?;
     final floor = (event['floor'] as String?) ?? _assignedFloor ?? '';
     final isFloorWide = event['isFloorWide'] == true;
+    final isFireDrill = event['isFireDrill'] == true;
     final isSelected = _selectedEventId == eventId;
 
     final isActive = status == 'active';
@@ -692,6 +732,24 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                 ),
                               ),
                             ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: isFireDrill
+                                    ? Colors.red.withValues(alpha: 0.1)
+                                    : Colors.blue.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                isFireDrill ? '화재대피훈련' : '일반 인원점검',
+                                style: TextStyle(
+                                  color: isFireDrill ? Colors.red : Colors.blue,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
@@ -712,7 +770,13 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                           if (isActive)
                             IconButton(
                               icon: const Icon(Icons.qr_code_scanner, color: Colors.blue),
-                              onPressed: () => _openQrScanner(eventId, title, roomNumber: roomNumber),
+                              onPressed: () => _openQrScanner(
+                                eventId,
+                                title,
+                                roomNumber: roomNumber,
+                                isFireDrill: isFireDrill,
+                                isArrivalStage: _fireDrillArrivalMode[eventId] ?? false,
+                              ),
                               tooltip: 'QR 코드 스캔',
                             ),
                           PopupMenuButton<String>(
@@ -785,6 +849,31 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                               ),
                             ),
                           ),
+                        if (isFireDrill)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: _buildFireDrillStageButton(
+                                    eventId: eventId,
+                                    label: '대피 시작',
+                                    selected: !(_fireDrillArrivalMode[eventId] ?? false),
+                                    onTap: () => setState(() => _fireDrillArrivalMode[eventId] = false),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: _buildFireDrillStageButton(
+                                    eventId: eventId,
+                                    label: '대피 도착',
+                                    selected: _fireDrillArrivalMode[eventId] ?? false,
+                                    onTap: () => setState(() => _fireDrillArrivalMode[eventId] = true),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         Row(
                           children: [
                             const SizedBox(width: 8),
@@ -811,7 +900,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                   border: Border.all(color: color.withValues(alpha: 0.4)),
                                 ),
                                 child: Text(
-                                  '$attended / $total명 출석',
+                                  '$attended / $total명 인원점검 확인',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
@@ -854,10 +943,43 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     );
   }
 
+  // 화재대피용 이벤트 카드의 "대피 시작"/"대피 도착" 모드 선택 버튼.
+  // 선택된 모드는 _fireDrillArrivalMode에 저장되고, QR 스캔 버튼을 누를 때 그대로 전달된다.
+  Widget _buildFireDrillStageButton({
+    required String eventId,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? Colors.red.withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: selected ? Colors.red : Colors.grey.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            color: selected ? Colors.red : Colors.grey.shade700,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildUnregisteredStudentTile(ExcelStudentRow student) {
     final name = student.name?.trim() ?? '이름 없음';
     final studentId = student.studentId?.trim() ?? '';
     final seatNumber = student.seatNumber?.trim() ?? '';
+    final roomNumber = student.roomNumber?.trim() ?? '';
 
     return Container(
       color: Colors.grey.withValues(alpha: 0.04),
@@ -878,6 +1000,11 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                   seatNumber.isNotEmpty ? '$name (자리 $seatNumber)' : name,
                   style: TextStyle(fontWeight: FontWeight.normal, color: Colors.grey.shade700),
                 ),
+                if (roomNumber.isNotEmpty)
+                  Text(
+                    '$roomNumber호',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                  ),
                 if (studentId.isNotEmpty)
                   Text(
                     studentId,
@@ -922,10 +1049,12 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       orElse: () => {},
     );
     final isEventClosed = (selectedEvent['status'] as String?) != 'active';
+    final isFireDrillEvent = selectedEvent['isFireDrill'] == true;
 
-    // 출석한 userId 세트 (부재/외박/외박미수정 등 상태 기록은 실제 출석이 아니므로 제외)
+    // 출석한 userId 세트 (부재/외박/외박미수정 등 상태 기록은 실제 출석이 아니므로 제외.
+    // 화재대피용 1차 스캔만 한(대피 시작만 확인, isComplete == false) 기록도 아직 출석 미완료로 제외한다.)
     final attendedIds = _records
-        .where((r) => r['recordType'] != 'status')
+        .where((r) => r['recordType'] != 'status' && r['isComplete'] != false)
         .map((r) => r['userId'] as String? ?? '')
         .where((id) => id.isNotEmpty)
         .toSet();
@@ -951,7 +1080,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
             child: Row(
               children: [
                 const Text(
-                  '출석 현황',
+                  '인원점검 현황',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
               ],
@@ -975,6 +1104,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                 final name = s['name'] as String? ?? '이름 없음';
                 final studentId = s['studentId'] as String? ?? '';
                 final seatNumber = s['seatNumber'] as String? ?? '';
+                final roomNumber = s['roomNumber'] as String? ?? '';
                 final residentStatus = (s['residentStatus'] as String?) ?? '재실중';
                 final isBlocked = _blockedStatuses.contains(residentStatus);
                 final blockedColor = _blockedStatusColors[residentStatus] ?? Colors.grey;
@@ -985,6 +1115,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                 );
                 final checkedAt =
                     (record['checkedInAt'] as Timestamp?)?.toDate();
+                // 화재대피용: 대피 시작만 확인되고 아직 도착 확인이 안 된 상태
+                final hasStartedOnly = record.isNotEmpty && record['isComplete'] == false;
 
                 final adminStatus = _adminStatuses[uid];
                 final floorStatus = _floorStatuses[uid];
@@ -1021,16 +1153,32 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              seatNumber.isNotEmpty ? '$name (자리 $seatNumber)' : name,
-                              style: TextStyle(
-                                fontWeight: isPresent ? FontWeight.bold : FontWeight.normal,
-                                color: isBlocked
-                                    ? blockedColor
-                                    : isPresent
-                                        ? Colors.black87
-                                        : Colors.grey.shade700,
-                              ),
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    seatNumber.isNotEmpty ? '$name (자리 $seatNumber)' : name,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight: isPresent ? FontWeight.bold : FontWeight.normal,
+                                      color: isBlocked
+                                          ? blockedColor
+                                          : isPresent
+                                              ? Colors.black87
+                                              : Colors.grey.shade700,
+                                    ),
+                                  ),
+                                ),
+                                if (roomNumber.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '$roomNumber호',
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        color: Colors.grey.shade500),
+                                  ),
+                                ],
+                              ],
                             ),
                             if (studentId.isNotEmpty)
                               Text(
@@ -1060,6 +1208,27 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                 ),
                               ),
                             ] else ...[
+                              if (hasStartedOnly) ...[
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: Colors.orange.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                        color: Colors.orange.withValues(alpha: 0.5)),
+                                  ),
+                                  child: Text(
+                                    '대피 시작 확인',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.orange.shade800,
+                                    ),
+                                  ),
+                                ),
+                              ],
                               if (hasAdminStatus) ...[
                                 const SizedBox(height: 4),
                                 Container(
@@ -1081,7 +1250,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                   ),
                                 ),
                               ],
-                              if (!isPresent) ...[
+                              if (!isPresent && !isFireDrillEvent) ...[
                                 const SizedBox(height: 6),
                                 DropdownButtonHideUnderline(
                                   child: Container(
@@ -1177,7 +1346,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Text(
-                '출석 기록이 없습니다',
+                '인원점검 기록이 없습니다',
                 style: TextStyle(color: Colors.grey.shade600),
               ),
             )
@@ -1241,13 +1410,27 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     );
   }
 
-  void _openQrScanner(String eventId, String eventTitle, {String? roomNumber}) {
+  void _openQrScanner(
+    String eventId,
+    String eventTitle, {
+    String? roomNumber,
+    bool isFireDrill = false,
+    bool isArrivalStage = false,
+  }) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => _QrScannerPage(
           eventTitle: eventTitle,
-          onScanned: (String qrData) => _processScannedStudent(eventId, roomNumber, qrData),
+          isFireDrill: isFireDrill,
+          isArrivalStage: isArrivalStage,
+          onScanned: (String qrData) => _processScannedStudent(
+            eventId,
+            roomNumber,
+            qrData,
+            isFireDrill: isFireDrill,
+            isArrivalStage: isArrivalStage,
+          ),
         ),
       ),
     );
@@ -1255,11 +1438,17 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
 
   /// 학생 QR("student:{studentId}")을 스캔한 결과를 검증하고 출석 기록을 남긴다.
   /// 반환값은 스캐너 화면에 보여줄 결과 메시지(성공 시 학생 이름, 실패 시 오류 메시지)이다.
+  ///
+  /// isFireDrill=true(화재대피용) 이벤트는 QR을 2회 스캔해야 출석이 확정된다.
+  /// isArrivalStage=false: 1차 스캔(대피 시작 확인) — 기록만 생성, 아직 미완료.
+  /// isArrivalStage=true: 2차 스캔(대피 도착 확인) — 기존 기록을 완료로 확정.
   Future<_ScanResult> _processScannedStudent(
     String eventId,
     String? eventRoomNumber,
-    String qrData,
-  ) async {
+    String qrData, {
+    bool isFireDrill = false,
+    bool isArrivalStage = false,
+  }) async {
     // QR 형식: "student:{studentId}:{issuedAtMs}"
     if (!qrData.startsWith('student:')) {
       return const _ScanResult(success: false, message: '유효하지 않은 QR 코드입니다');
@@ -1310,7 +1499,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       final uid = studentDoc.id;
       final residentStatus = (student['residentStatus'] as String?) ?? '재실중';
       if (_blockedStatuses.contains(residentStatus)) {
-        return _ScanResult(success: false, message: '현재 상태($residentStatus)로는 출석체크가 불가능합니다');
+        return _ScanResult(success: false, message: '현재 상태($residentStatus)로는 인원점검이 불가능합니다');
       }
 
       if (eventRoomNumber != null && eventRoomNumber.isNotEmpty) {
@@ -1318,7 +1507,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         if (studentRoom != eventRoomNumber) {
           return _ScanResult(
             success: false,
-            message: '$eventRoomNumber호 출석 이벤트입니다. 학생 호실($studentRoom호)과 일치하지 않습니다',
+            message: '$eventRoomNumber호 인원점검 이벤트입니다. 학생 호실($studentRoom호)과 일치하지 않습니다',
           );
         }
       }
@@ -1328,45 +1517,122 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           .where('userId', isEqualTo: uid)
           .where('eventId', isEqualTo: eventId)
           .get();
-      if (existing.docs.isNotEmpty) {
-        return _ScanResult(success: false, message: '${student['name'] ?? ''}님은 이미 출석체크를 완료했습니다');
+      final existingDoc = existing.docs.firstOrNull;
+      final existingIsComplete = existingDoc?.data()['isComplete'] != false;
+      final studentName = student['name'] ?? '';
+
+      if (!isFireDrill) {
+        if (existingDoc != null) {
+          return _ScanResult(success: false, message: '$studentName님은 이미 인원점검을 완료했습니다');
+        }
+        final batch = _firestore.batch();
+        final recordRef = _firestore.collection('attendance_records').doc();
+        batch.set(recordRef, {
+          'eventId': eventId,
+          'eventTitle': eventData['title'] ?? '',
+          'userId': uid,
+          'userName': studentName,
+          'studentId': studentId,
+          'roomNumber': student['roomNumber'] ?? '',
+          'dormBuilding': student['dormBuilding'] ?? '',
+          'checkedInAt': Timestamp.now(),
+          'isComplete': true,
+          'isFireDrill': false,
+        });
+        final eventRef = _firestore.collection('attendance_events').doc(eventId);
+        batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
+        await batch.commit();
+
+        _loadEvents(showLoading: false);
+        if (_selectedEventId == eventId) {
+          _loadRecords(eventId);
+        }
+        return _ScanResult(success: true, message: '$studentName님 인원점검 완료');
       }
 
-      final batch = _firestore.batch();
-      final recordRef = _firestore.collection('attendance_records').doc();
-      batch.set(recordRef, {
-        'eventId': eventId,
-        'eventTitle': eventData['title'] ?? '',
-        'userId': uid,
-        'userName': student['name'] ?? '',
-        'studentId': studentId,
-        'roomNumber': student['roomNumber'] ?? '',
-        'dormBuilding': student['dormBuilding'] ?? '',
-        'checkedInAt': Timestamp.now(),
-      });
-      final eventRef = _firestore.collection('attendance_events').doc(eventId);
-      batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
-      await batch.commit();
+      // 화재대피용: 2회 스캔(대피 시작 → 대피 도착)이 모두 있어야 출석 확정.
+      if (!isArrivalStage) {
+        // 1차: 대피 시작 확인
+        if (existingDoc != null) {
+          return _ScanResult(
+            success: false,
+            message: existingIsComplete
+                ? '$studentName님은 이미 인원점검을 완료했습니다'
+                : '$studentName님은 이미 대피 시작을 확인했습니다',
+          );
+        }
+        final recordRef = _firestore.collection('attendance_records').doc();
+        await recordRef.set({
+          'eventId': eventId,
+          'eventTitle': eventData['title'] ?? '',
+          'userId': uid,
+          'userName': studentName,
+          'studentId': studentId,
+          'roomNumber': student['roomNumber'] ?? '',
+          'dormBuilding': student['dormBuilding'] ?? '',
+          'checkedInAt': Timestamp.now(),
+          'isComplete': false,
+          'isFireDrill': true,
+        });
 
-      _loadEvents();
-      if (_selectedEventId == eventId) {
-        _loadRecords(eventId);
+        _loadEvents(showLoading: false);
+        if (_selectedEventId == eventId) {
+          _loadRecords(eventId);
+        }
+        return _ScanResult(success: true, message: '$studentName님 대피 시작 확인');
+      } else {
+        // 2차: 대피 도착 확인 (대피 시작을 스캔하지 않았어도 도착만으로 출석 인정)
+        if (existingDoc != null) {
+          if (existingIsComplete) {
+            return _ScanResult(success: false, message: '$studentName님은 이미 인원점검을 완료했습니다');
+          }
+          final batch = _firestore.batch();
+          batch.update(existingDoc.reference, {
+            'arrivalCheckedAt': Timestamp.now(),
+            'isComplete': true,
+          });
+          final eventRef = _firestore.collection('attendance_events').doc(eventId);
+          batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
+          await batch.commit();
+        } else {
+          final batch = _firestore.batch();
+          final recordRef = _firestore.collection('attendance_records').doc();
+          batch.set(recordRef, {
+            'eventId': eventId,
+            'eventTitle': eventData['title'] ?? '',
+            'userId': uid,
+            'userName': studentName,
+            'studentId': studentId,
+            'roomNumber': student['roomNumber'] ?? '',
+            'dormBuilding': student['dormBuilding'] ?? '',
+            'arrivalCheckedAt': Timestamp.now(),
+            'isComplete': true,
+            'isFireDrill': true,
+          });
+          final eventRef = _firestore.collection('attendance_events').doc(eventId);
+          batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
+          await batch.commit();
+        }
+
+        _loadEvents(showLoading: false);
+        if (_selectedEventId == eventId) {
+          _loadRecords(eventId);
+        }
+        return _ScanResult(success: true, message: '$studentName님 인원점검 완료');
       }
-
-      return _ScanResult(success: true, message: '${student['name'] ?? ''}님 출석 완료');
     } catch (e) {
       return _ScanResult(success: false, message: '오류: $e');
     }
   }
 
   /// 구역(floor) 전체의 재실 학생을 조회한다. 퇴사 등 재실중이 아닌 학생은 제외한다.
-  Future<({List<Map<String, dynamic>> students, List<String> occupiedRooms})> _loadStudentsForFloor(
+  Future<({List<Map<String, dynamic>> students, List<String> occupiedRooms, List<String> allRoomNumbers})> _loadStudentsForFloor(
     String floor,
   ) async {
     final roomMap = await _loadRoomsForFloor(floor);
     final occupiedRooms = roomMap.entries.where((e) => e.value).map((e) => e.key).toList();
-    final dormBuilding =
-        floor.contains('겨울방학') ? '샬롬하우스(겨울방학)' : floor.split(' ').firstOrNull;
+    final allRoomNumbers = roomMap.keys.toList();
+    final dormBuilding = _dormBuildingOf(floor);
     final students = <Map<String, dynamic>>[];
     if (occupiedRooms.isNotEmpty && dormBuilding != null) {
       // whereIn은 최대 30개까지만 지원하므로 청크로 나눠 조회한다.
@@ -1391,7 +1657,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       if (roomA != roomB) return roomA.compareTo(roomB);
       return (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? '');
     });
-    return (students: students, occupiedRooms: occupiedRooms);
+    return (students: students, occupiedRooms: occupiedRooms, allRoomNumbers: allRoomNumbers);
   }
 
   // 반환값: 호실번호 -> 거주 학생 존재 여부 (전체 호실을 보여주되 체크 초기값 결정용)
@@ -1465,58 +1731,29 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       builder: (ctx) => _RoomEventCreateDialog(
         initialFloor: _assignedFloor ?? kFloorOptions.first,
         loadRoomsForFloor: _loadRoomsForFloor,
-        onCreate: (title, selectedFloor, selectedRooms) async {
+        onCreateFloorWide: (title, selectedFloor, isFireDrill) async {
           Navigator.pop(ctx);
-          for (final room in selectedRooms) {
-            await _createEvent(title, floor: selectedFloor, roomNumber: room);
-          }
-        },
-        onCreateFloorWide: (title, selectedFloor) async {
-          Navigator.pop(ctx);
-          await _createFloorWideEvent(title, floor: selectedFloor);
+          await _createFloorWideEvent(title, floor: selectedFloor, isFireDrill: isFireDrill);
         },
       ),
     );
   }
 
-  Future<void> _createEvent(String title, {required String floor, String roomNumber = ''}) async {
-    try {
-      await _firestore.collection('attendance_events').add({
-        'title': title,
-        if (roomNumber.isNotEmpty) 'roomNumber': roomNumber,
-        'floor': floor,
-        'status': 'active',
-        'token': _generateToken(),
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-      _loadEvents();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('이벤트가 생성되었습니다')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('오류: $e'), backgroundColor: Colors.red),
-        );
-      }
-    }
-  }
-
   /// 구역(floor) 전체 재실 학생을 대상으로 하는 통합 이벤트 1개를 생성한다.
   /// (호실별로 여러 이벤트를 만드는 기존 방식과 달리 roomNumber를 두지 않는다.)
-  Future<void> _createFloorWideEvent(String title, {required String floor}) async {
+  /// isFireDrill=true(화재대피용)인 경우에만 QR 2회 스캔 및 상벌점 자동부여 로직이 적용된다.
+  Future<void> _createFloorWideEvent(String title, {required String floor, bool isFireDrill = false}) async {
     try {
       await _firestore.collection('attendance_events').add({
         'title': title,
         'floor': floor,
         'isFloorWide': true,
+        'isFireDrill': isFireDrill,
         'status': 'active',
         'token': _generateToken(),
         'createdAt': FieldValue.serverTimestamp(),
       });
-      _loadEvents();
+      _loadEvents(showLoading: false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('통합 이벤트가 생성되었습니다')),
@@ -1540,7 +1777,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       if (newStatus == 'closed') {
         await _archiveManualStatuses(eventId);
       }
-      _loadEvents();
+      _loadEvents(showLoading: false);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1561,7 +1798,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       final floorStatusSetBy = (eventData['floorStatusSetBy'] as Map<String, dynamic>?) ?? {};
       final floorStatusSetByName = (eventData['floorStatusSetByName'] as Map<String, dynamic>?) ?? {};
       if (adminStatuses.isEmpty && floorStatuses.isEmpty) return;
-      final eventTitle = (eventData['title'] as String?) ?? '출석체크';
+      final eventTitle = (eventData['title'] as String?) ?? '인원점검';
 
       // uid -> {'admin': status?, 'floor': status?}
       final combined = <String, Map<String, String?>>{};
@@ -1622,9 +1859,17 @@ class _ScanResult {
 // 학생 QR 스캔 페이지
 class _QrScannerPage extends StatefulWidget {
   final String eventTitle;
-  final Future<_ScanResult> Function(String) onScanned;
+  final bool isFireDrill;
+  // 화재대피용 전용: false=대피 시작 확인(1차), true=대피 도착 확인(2차). 이벤트 카드에서 미리 선택한 값을 그대로 받는다.
+  final bool isArrivalStage;
+  final Future<_ScanResult> Function(String qrData) onScanned;
 
-  const _QrScannerPage({required this.eventTitle, required this.onScanned});
+  const _QrScannerPage({
+    required this.eventTitle,
+    this.isFireDrill = false,
+    this.isArrivalStage = false,
+    required this.onScanned,
+  });
 
   @override
   State<_QrScannerPage> createState() => _QrScannerPageState();
@@ -1690,6 +1935,29 @@ class _QrScannerPageState extends State<_QrScannerPage> {
               ),
             ),
           ),
+          // 화재대피용: 이벤트 카드에서 미리 선택한 현재 스캔 모드 안내(고정 표시, 여기서는 변경 불가)
+          if (widget.isFireDrill)
+            Positioned(
+              top: 16,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  widget.isArrivalStage ? '대피 도착 확인 모드' : '대피 시작 확인 모드',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
           // 결과/안내 메시지
           Positioned(
             bottom: 80,
@@ -1715,20 +1983,18 @@ class _QrScannerPageState extends State<_QrScannerPage> {
       ),
     );
   }
+
 }
 
 // ── 호실별 이벤트 생성 다이얼로그 ──
 class _RoomEventCreateDialog extends StatefulWidget {
   final String initialFloor;
   final Future<Map<String, bool>> Function(String floor) loadRoomsForFloor;
-  final Future<void> Function(
-      String title, String selectedFloor, List<String> selectedRooms) onCreate;
-  final Future<void> Function(String title, String selectedFloor) onCreateFloorWide;
+  final Future<void> Function(String title, String selectedFloor, bool isFireDrill) onCreateFloorWide;
 
   const _RoomEventCreateDialog({
     required this.initialFloor,
     required this.loadRoomsForFloor,
-    required this.onCreate,
     required this.onCreateFloorWide,
   });
 
@@ -1742,13 +2008,22 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
   late String _selectedFloor;
   // 호실번호 -> 거주 학생 존재 여부
   Map<String, bool> _rooms = {};
-  Set<String> _selectedRooms = {};
   bool _isLoadingRooms = false;
   bool _isCreating = false;
-  // true면 구역 전체 재실 학생을 1개 통합 이벤트로 생성 (호실별 개별 생성이 아님)
-  bool _isFloorWideMode = false;
+  // true면 화재대피용(종료 시 상벌점 자동 부여), false면 일반 인원점검
+  bool _isFireDrill = false;
 
   int get _occupiedRoomCount => _rooms.values.where((v) => v).length;
+
+  // 재실 학생이 있는 호실 중 가장 작은/큰 호수 (예: "201호 ~ 726호")
+  String? get _occupiedRoomRangeLabel {
+    final occupied = _rooms.entries.where((e) => e.value).map((e) => e.key).toList();
+    if (occupied.isEmpty) return null;
+    occupied.sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+    final first = occupied.first;
+    final last = occupied.last;
+    return first == last ? '$first호' : '$first호 ~ $last호';
+  }
 
   @override
   void initState() {
@@ -1764,25 +2039,12 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
     setState(() {
       _isLoadingRooms = true;
       _rooms = {};
-      _selectedRooms = {};
     });
     final rooms = await widget.loadRoomsForFloor(floor);
     if (!mounted) return;
     setState(() {
       _rooms = rooms;
-      // 거주 학생이 있는 호실만 기본 체크
-      _selectedRooms = rooms.entries.where((e) => e.value).map((e) => e.key).toSet();
       _isLoadingRooms = false;
-    });
-  }
-
-  void _toggleAll(bool? value) {
-    setState(() {
-      if (value == true) {
-        _selectedRooms = _rooms.entries.where((e) => e.value).map((e) => e.key).toSet();
-      } else {
-        _selectedRooms.clear();
-      }
     });
   }
 
@@ -1794,11 +2056,12 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final allSelected =
-        _occupiedRoomCount > 0 && _selectedRooms.length == _occupiedRoomCount;
+    final canCreate = !_isCreating &&
+        _titleController.text.trim().isNotEmpty &&
+        _occupiedRoomCount > 0;
 
     return AlertDialog(
-      title: const Text('출석 이벤트 생성'),
+      title: const Text('인원점검 생성'),
       content: SizedBox(
         width: double.maxFinite,
         child: SingleChildScrollView(
@@ -1821,7 +2084,7 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
                 ),
               ),
               const SizedBox(height: 12),
-              // 생성 방식 선택
+              // 생성 방식 선택 (둘 다 구역 전체를 1개 이벤트로 생성. 화재대피용만 종료 시 상벌점 자동 부여)
               const Text('생성 방식', style: TextStyle(fontWeight: FontWeight.w600)),
               Row(
                 children: [
@@ -1830,9 +2093,9 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       value: false,
-                      groupValue: _isFloorWideMode,
-                      onChanged: (v) => setState(() => _isFloorWideMode = v ?? false),
-                      title: const Text('호실별 개별 생성', style: TextStyle(fontSize: 13)),
+                      groupValue: _isFireDrill,
+                      onChanged: (v) => setState(() => _isFireDrill = v ?? false),
+                      title: const Text('일반 인원점검', style: TextStyle(fontSize: 13)),
                     ),
                   ),
                   Expanded(
@@ -1840,9 +2103,9 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
                       dense: true,
                       contentPadding: EdgeInsets.zero,
                       value: true,
-                      groupValue: _isFloorWideMode,
-                      onChanged: (v) => setState(() => _isFloorWideMode = v ?? false),
-                      title: const Text('구역 전체 통합', style: TextStyle(fontSize: 13)),
+                      groupValue: _isFireDrill,
+                      onChanged: (v) => setState(() => _isFireDrill = v ?? false),
+                      title: const Text('"화재대피용" 인원점검', style: TextStyle(fontSize: 13)),
                     ),
                   ),
                 ],
@@ -1853,15 +2116,7 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
                   padding: EdgeInsets.symmetric(vertical: 24),
                   child: Center(child: CircularProgressIndicator()),
                 )
-              else if (_rooms.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: Text(
-                    '선택한 구역에 배정된 학생이 없습니다',
-                    style: TextStyle(color: Colors.grey.shade600),
-                  ),
-                )
-              else if (_isFloorWideMode)
+              else
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -1875,68 +2130,14 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
                       Expanded(
                         child: Text(
                           _occupiedRoomCount > 0
-                              ? '$_selectedFloor 구역의 재실 학생 전원(${_occupiedRoomCount}개 호실)을 하나의 이벤트로 생성합니다.'
+                              ? '$_selectedFloor 구역의 재실 학생 전원($_occupiedRoomRangeLabel, $_occupiedRoomCount개 호실)을 하나의 이벤트로 생성합니다.'
                               : '해당 구역에 재실 학생이 없습니다.',
                           style: const TextStyle(fontSize: 13),
                         ),
                       ),
                     ],
                   ),
-                )
-              else ...[
-                // 전체 선택
-                Row(
-                  children: [
-                    Checkbox(
-                      value: allSelected,
-                      tristate: false,
-                      onChanged: _toggleAll,
-                    ),
-                    Text(
-                      '전체 선택 (${_selectedRooms.length}/$_occupiedRoomCount호)',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ],
                 ),
-                Text(
-                  '거주 학생이 없는 호실은 선택할 수 없습니다',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                ),
-                const Divider(height: 1),
-                // 호실 목록
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _rooms.length,
-                  itemBuilder: (context, index) {
-                    final room = _rooms.keys.elementAt(index);
-                    final isOccupied = _rooms[room] ?? false;
-                    final isSelected = _selectedRooms.contains(room);
-                    return CheckboxListTile(
-                      dense: true,
-                      enabled: isOccupied,
-                      value: isSelected,
-                      title: Text(
-                        isOccupied ? '$room호' : '$room호 (거주 학생 없음)',
-                        style: !isOccupied
-                            ? TextStyle(color: Colors.grey.shade400)
-                            : null,
-                      ),
-                      onChanged: !isOccupied
-                          ? null
-                          : (val) {
-                              setState(() {
-                                if (val == true) {
-                                  _selectedRooms.add(room);
-                                } else {
-                                  _selectedRooms.remove(room);
-                                }
-                              });
-                            },
-                    );
-                  },
-                ),
-              ],
             ],
           ),
         ),
@@ -1947,35 +2148,23 @@ class _RoomEventCreateDialogState extends State<_RoomEventCreateDialog> {
           child: const Text('취소'),
         ),
         FilledButton(
-          onPressed: (_isCreating ||
-                  _titleController.text.trim().isEmpty ||
-                  (_isFloorWideMode ? _occupiedRoomCount == 0 : _selectedRooms.isEmpty))
-              ? null
-              : () async {
+          onPressed: canCreate
+              ? () async {
                   setState(() => _isCreating = true);
-                  if (_isFloorWideMode) {
-                    await widget.onCreateFloorWide(
-                      _titleController.text.trim(),
-                      _selectedFloor,
-                    );
-                  } else {
-                    await widget.onCreate(
-                      _titleController.text.trim(),
-                      _selectedFloor,
-                      _selectedRooms.toList()
-                        ..sort((a, b) =>
-                            (int.tryParse(a) ?? 0)
-                                .compareTo(int.tryParse(b) ?? 0)),
-                    );
-                  }
-                },
+                  await widget.onCreateFloorWide(
+                    _titleController.text.trim(),
+                    _selectedFloor,
+                    _isFireDrill,
+                  );
+                }
+              : null,
           child: _isCreating
               ? const SizedBox(
                   width: 16,
                   height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : Text(_isFloorWideMode ? '통합 생성' : '${_selectedRooms.length}개 생성'),
+              : const Text('생성'),
         ),
       ],
     );
@@ -2318,7 +2507,7 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
                             if (latestAt != null) ...[
                               const SizedBox(height: 4),
                               Text(
-                                '최근 출석: ${DateFormat('yyyy.MM.dd HH:mm').format(latestAt)}',
+                                '최근 인원점검: ${DateFormat('yyyy.MM.dd HH:mm').format(latestAt)}',
                                 style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
                               ),
                             ],
@@ -2416,7 +2605,7 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
         Expanded(
           child: records.isEmpty
               ? Center(
-                  child: Text('출석 이력이 없습니다',
+                  child: Text('인원점검 이력이 없습니다',
                       style: TextStyle(color: Colors.grey.shade500)),
                 )
               : ListView.builder(
@@ -2432,6 +2621,9 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
   static const _statusColors = {
     '재실확인': Colors.green,
     '외박': Color(0xFFFF9800),
+    '외박신청완료': Color(0xFFFF9800),
+    '화재대피참석': Colors.green,
+    '화재대피훈련불참': Colors.red,
     '부재': Colors.red,
     '외박미수정': Colors.blue,
     '외박미신청': Colors.red,
@@ -2441,6 +2633,9 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
   static const _statusIcons = {
     '재실확인': Icons.check_circle,
     '외박': Icons.flight,
+    '외박신청완료': Icons.flight,
+    '화재대피참석': Icons.check_circle,
+    '화재대피훈련불참': Icons.cancel,
     '부재': Icons.person_off,
     '외박미수정': Icons.warning_amber,
     '외박미신청': Icons.warning_amber,
@@ -2451,16 +2646,23 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
   Widget _buildHistoryCard(Map<String, dynamic> data) {
     final eventId = (data['eventId'] as String?) ?? '';
     final event = _eventMap[eventId];
-    final eventTitle = (event?['title'] as String?) ?? (data['eventTitle'] as String?) ?? '출석체크';
+    final eventTitle = (event?['title'] as String?) ?? (data['eventTitle'] as String?) ?? '인원점검';
     final checkedInAt = (data['checkedInAt'] as Timestamp?)?.toDate();
     final isStatusRecord = data['recordType'] == 'status';
     final adminStatus = data['adminStatus'] as String?;
     final floorStatus = data['floorStatus'] as String?;
     final floorStatusSetBy = data['floorStatusSetBy'] as String?;
+    final isFireDrillEvent = event?['isFireDrill'] == true;
+    final isComplete = data['isComplete'] != false;
 
     final String primaryStatus;
-    if (isStatusRecord) {
+    if (isStatusRecord && adminStatus == '외박') {
+      // 외박신청완료가 최우선 — 화재대피 참석 여부보다 먼저 표시한다.
+      primaryStatus = '외박신청완료';
+    } else if (isStatusRecord) {
       primaryStatus = floorStatus ?? adminStatus ?? '기타';
+    } else if (isFireDrillEvent) {
+      primaryStatus = isComplete ? '화재대피참석' : '화재대피훈련불참';
     } else {
       primaryStatus = '재실확인';
     }

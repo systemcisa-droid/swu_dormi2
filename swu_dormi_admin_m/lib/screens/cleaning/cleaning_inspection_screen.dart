@@ -248,8 +248,47 @@ class _CleaningInspectionContentState
   List<QueryDocumentSnapshot> _requests = [];
   bool _isLoadingSchedules = true;
   bool _isLoadingRequests = true;
+  // 스케줄 추가/평가 제출/대리 신청 처리 중 여부 — 연타로 중복 생성되는 것을 막는다.
+  bool _isSubmitting = false;
   String? _selectedScheduleId;
   String? _selectedFloorFilter;
+  // 신청 카드별 메모 입력 컨트롤러. 스트림 갱신 중에도 입력값이 유지되도록 보관한다.
+  final Map<String, TextEditingController> _memoControllers = {};
+  // 메모 저장 중인 신청 ID (중복 저장 방지)
+  final Set<String> _savingMemoIds = {};
+
+  @override
+  void dispose() {
+    for (final c in _memoControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  /// 신청 메모를 저장한다. 층장이 검사 상황(무단퇴사 등)을 기록하는 용도.
+  Future<void> _saveRequestMemo(String requestId, String memo) async {
+    if (_savingMemoIds.contains(requestId)) return;
+    setState(() => _savingMemoIds.add(requestId));
+    try {
+      await _firestore.collection('cleaning_requests').doc(requestId).update({
+        'memo': memo.trim().isEmpty ? null : memo.trim(),
+        'updatedAt': Timestamp.now(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('메모를 저장했습니다'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('메모 저장 오류: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingMemoIds.remove(requestId));
+    }
+  }
 
   List<QueryDocumentSnapshot> get _filteredSchedules {
     final list = _schedules.where((doc) {
@@ -303,8 +342,12 @@ class _CleaningInspectionContentState
     }
   }
 
-  Future<void> _loadRequests() async {
-    setState(() => _isLoadingRequests = true);
+  /// [showLoading]이 false면 로딩 화면으로 교체하지 않고 조용히 갱신한다.
+  /// (평가 제출 후 재조회 시 목록이 사라졌다 다시 그려지며 스크롤이 초기화되는 것을 막는다)
+  Future<void> _loadRequests({bool showLoading = true}) async {
+    setState(() {
+      if (showLoading) _isLoadingRequests = true;
+    });
     try {
       final snap = await _firestore
           .collection('cleaning_requests')
@@ -450,9 +493,15 @@ class _CleaningInspectionContentState
 
     final stripeColor = buildingColor(floor);
 
+    // 기간외신청 일정: 학생은 직접 신청할 수 없고 층장/관리자 대리 신청만 가능
+    final isAdminOnlySchedule = data['adminOnly'] == true;
+
     Color statusColor;
     String statusText;
-    if (isDeadlinePassed && status == 'open') {
+    if (isAdminOnlySchedule && status == 'open' && !isDeadlinePassed) {
+      statusColor = Colors.deepPurple;
+      statusText = '기간외신청';
+    } else if (isDeadlinePassed && status == 'open') {
       statusColor = Colors.grey;
       statusText = '신청만료';
     } else if (isNotStartedYet && status == 'open') {
@@ -1036,12 +1085,105 @@ class _CleaningInspectionContentState
               );
             }(),
           ],
-          if (memo != null && memo.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text('메모: $memo',
-                style: TextStyle(
-                    fontSize: 12, color: Colors.grey.shade600)),
+          // 대리점검: 검사 당일 신청자 대신 입회할 학생
+          if (data['isProxyInspection'] == true) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.person_pin_circle_outlined,
+                    size: 14, color: Colors.deepPurple.shade400),
+                const SizedBox(width: 4),
+                Text(
+                  '대리점검: ${(data['proxyUserName'] as String?) ?? ''}'
+                  '${(data['proxyRoomNumber'] as String?)?.isNotEmpty == true ? ' (${data['proxyRoomNumber']}호)' : ''}',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.deepPurple.shade400,
+                      fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
           ],
+          // 메모: 층장이 검사 상황(무단퇴사, 청소 미실시 등)을 기록한다.
+          const SizedBox(height: 8),
+          () {
+            final ctrl = _memoControllers.putIfAbsent(
+              doc.id,
+              () => TextEditingController(text: memo ?? ''),
+            );
+            final isSaving = _savingMemoIds.contains(doc.id);
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: ctrl,
+                    enabled: !isSaving,
+                    maxLines: null,
+                    style: const TextStyle(fontSize: 12),
+                    decoration: InputDecoration(
+                      labelText: '메모',
+                      labelStyle: const TextStyle(fontSize: 12),
+                      hintText: '무단퇴사, 영구퇴사, 청소 미실시 학생없음 등',
+                      hintStyle:
+                          TextStyle(fontSize: 11, color: Colors.grey.shade400),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 8),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(6)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                SizedBox(
+                  height: 36,
+                  child: FilledButton(
+                    onPressed: isSaving
+                        ? null
+                        : () => _saveRequestMemo(doc.id, ctrl.text),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      backgroundColor: const Color(0xFFA6BF96),
+                    ),
+                    child: isSaving
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Text('저장', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
+            );
+          }(),
+          // 자주 쓰는 메모를 한 번에 입력할 수 있는 추천 문구
+          () {
+            final ctrl = _memoControllers[doc.id];
+            if (ctrl == null) return const SizedBox.shrink();
+            const presets = ['무단퇴사', '영구퇴사', '청소 미실시 학생없음'];
+            return Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: presets.map((t) {
+                  return ActionChip(
+                    label: Text(t, style: const TextStyle(fontSize: 11)),
+                    visualDensity: VisualDensity.compact,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    padding: EdgeInsets.zero,
+                    labelPadding:
+                        const EdgeInsets.symmetric(horizontal: 6),
+                    backgroundColor: Colors.grey.shade100,
+                    side: BorderSide(color: Colors.grey.shade300),
+                    onPressed: () => setState(() => ctrl.text = t),
+                  );
+                }).toList(),
+              ),
+            );
+          }(),
           if (scoreAvg != null || grade != null) ...[
             const SizedBox(height: 6),
             Row(
@@ -1186,6 +1328,8 @@ class _CleaningInspectionContentState
     final fixedFloor = _selectedFloorFilter;
     String selectedFloor = fixedFloor ?? kFloorOptions.first;
     String selectedInspectionType = widget.inspectionType;
+    // 기간외신청: 학생에게 목록은 보이지만 직접 신청은 할 수 없는 일정
+    bool isAdminOnly = false;
 
     showDialog(
       context: context,
@@ -1449,6 +1593,20 @@ class _CleaningInspectionContentState
                     border: OutlineInputBorder(),
                   ),
                 ),
+                const SizedBox(height: 8),
+                CheckboxListTile(
+                  value: isAdminOnly,
+                  onChanged: (v) => setDialogState(() => isAdminOnly = v ?? false),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: const Text('기간외신청',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  subtitle: Text(
+                    '학생에게 목록은 보이지만 직접 신청할 수 없는 일정입니다. (관리자·층장 대리 신청만 가능)',
+                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1472,6 +1630,7 @@ class _CleaningInspectionContentState
                   deadlineTimeCtrl.text.trim(),
                   selectedInspectionType,
                   cleaningNoteCtrl.text.trim(),
+                  isAdminOnly,
                 );
               },
               child: const Text('추가'),
@@ -1494,7 +1653,11 @@ class _CleaningInspectionContentState
     String deadlineTime,
     String inspectionType,
     String cleaningNote,
+    bool isAdminOnly,
   ) async {
+    // 처리 중 재진입(중복 생성) 방지
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
     try {
       final asParts = applyStartTime.split(':');
       final asHour = int.tryParse(asParts.isNotEmpty ? asParts[0] : '0') ?? 0;
@@ -1509,7 +1672,8 @@ class _CleaningInspectionContentState
           deadlineDate.year, deadlineDate.month, deadlineDate.day, hour, minute);
 
       final isMoveOut = inspectionType == 'move_out';
-      final dayCount = isMoveOut ? 1 : 4;
+      // 퇴사검사와 기간외신청 일정은 1개만, 일반 월검사는 4일 연속으로 생성한다.
+      final dayCount = (isMoveOut || isAdminOnly) ? 1 : 4;
 
       final batch = _firestore.batch();
       for (int i = 0; i < dayCount; i++) {
@@ -1529,6 +1693,8 @@ class _CleaningInspectionContentState
           'applicationStart': Timestamp.fromDate(applyStart),
           'applicationDeadline': Timestamp.fromDate(deadline),
           if (cleaningNote.isNotEmpty) 'cleaningNote': cleaningNote,
+          // true면 학생 앱에서 목록은 보이되 신청 버튼이 막힌다(대리 신청 전용).
+          'adminOnly': isAdminOnly,
         });
       }
       await batch.commit();
@@ -1537,7 +1703,11 @@ class _CleaningInspectionContentState
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isMoveOut ? '퇴사 검사 일정이 추가되었습니다' : '4일 연속 일정이 추가되었습니다'),
+            content: Text(isMoveOut
+                ? '퇴사 검사 일정이 추가되었습니다'
+                : isAdminOnly
+                    ? '기간외신청 일정이 추가되었습니다'
+                    : '4일 연속 일정이 추가되었습니다'),
             backgroundColor: Colors.green,
           ),
         );
@@ -1551,6 +1721,8 @@ class _CleaningInspectionContentState
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -1762,7 +1934,9 @@ class _CleaningInspectionContentState
     final isMoveOut = inspectionType == 'move_out';
 
     // 퇴사검사: 학생이 신청 시 선택한 공동구역만 평가
-    Map<String, List<String>> filteredCommunal = structures.communal;
+    final Map<String, List<String>> filteredCommunal = structures.communal;
+    // 학생이 신청 시 선택하지 않은 공동구역(토글 기본 꺼짐 대상)
+    Set<String> unselectedCommunal = {};
     if (isMoveOut) {
       final rawCommonAreas = data['commonAreas'];
       debugPrint('[공동구역] rawCommonAreas runtimeType: ${rawCommonAreas.runtimeType}');
@@ -1793,10 +1967,12 @@ class _CleaningInspectionContentState
         final mappedSelected = selected.map((a) => areaKeyMap[a] ?? a).toSet();
         debugPrint('[공동구역] mappedSelected: $mappedSelected');
         debugPrint('[공동구역] structures.communal keys: ${structures.communal.keys.toList()}');
-        filteredCommunal = Map.fromEntries(
-          structures.communal.entries.where((e) => mappedSelected.contains(e.key)),
-        );
-        debugPrint('[공동구역] filteredCommunal keys: ${filteredCommunal.keys.toList()}');
+        // 목록은 전체 구역을 그대로 보여주고(층장이 상황에 따라 켤 수 있도록),
+        // 학생이 신청 시 고르지 않은 구역은 토글을 꺼둔 상태로 시작한다.
+        unselectedCommunal = structures.communal.keys
+            .where((k) => !mappedSelected.contains(k))
+            .toSet();
+        debugPrint('[공동구역] unselectedCommunal: $unselectedCommunal');
       }
     }
 
@@ -1832,6 +2008,18 @@ class _CleaningInspectionContentState
         ),
     };
     final Map<String, int> communalScores = loadOrMake(filteredCommunal, savedCommunal, prefill: prefillCommunal);
+    // 검사하지 않는 공동구역 그룹. 저장된 값이 있으면 복원한다.
+    // (평균/합격 판정과 저장 대상에서 모두 제외된다)
+    // 이미 평가된 건은 저장된 상태를 그대로 복원하고(기존 점수가 임의로 빠지지 않도록),
+    // 첫 평가라면 학생이 신청 시 고르지 않은 구역을 꺼둔 상태로 시작한다.
+    final savedDisabled =
+        (data['disabledCommunalAreas'] as List?)?.whereType<String>().toList();
+    final disabledCommunal = <String>{
+      if (savedDisabled != null)
+        ...savedDisabled
+      else if (savedCommunal == null)
+        ...unselectedCommunal,
+    };
     int selectedTabIndex = 0;
     final existingComment = (data['inspectionComment'] as String?) ?? '';
     final inspectionCommentCtrl = TextEditingController(text: existingComment);
@@ -1841,8 +2029,13 @@ class _CleaningInspectionContentState
       barrierDismissible: false,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
-          final avg = _calcAvg(studentScores, communalScores);
-          final failCount = isMoveOut ? _countFail(studentScores, communalScores) : 0;
+          // 검사하지 않는 공동구역은 평균/합격 판정에서 제외한다.
+          final activeCommunal = <String, int>{
+            for (final e in communalScores.entries)
+              if (!disabledCommunal.contains(e.key.split('_').first)) e.key: e.value,
+          };
+          final avg = _calcAvg(studentScores, activeCommunal);
+          final failCount = isMoveOut ? _countFail(studentScores, activeCommunal) : 0;
           final avgColor = isMoveOut
               ? (failCount == 0 ? Colors.green : Colors.red)
               : (avg >= 3.5 ? Colors.green : avg >= 2.5 ? Colors.blue : Colors.red);
@@ -1856,8 +2049,8 @@ class _CleaningInspectionContentState
               return studentScores[roomStudents[idx]]!.values.where((v) => v == 0).length;
             }
             return isMoveOut
-                ? communalScores.values.where((v) => v == 0).length
-                : communalScores.values.where((v) => v <= 2).length;
+                ? activeCommunal.values.where((v) => v == 0).length
+                : activeCommunal.values.where((v) => v <= 2).length;
           }
 
           return Dialog(
@@ -1984,6 +2177,8 @@ class _CleaningInspectionContentState
                                 setDialogState,
                                 isMoveOut ? Colors.purple : Colors.teal,
                                 isMoveOut: isMoveOut,
+                                // 퇴사검사 공동구역만 그룹별 검사 여부를 켜고 끌 수 있다.
+                                disabledGroups: isMoveOut ? disabledCommunal : null,
                               ),
                       ),
                     ),
@@ -2046,11 +2241,13 @@ class _CleaningInspectionContentState
                           onPressed: () {
                             Navigator.pop(dialogCtx);
                             _submitEvaluation(
-                                requestId, avg, communalScores,
+                                requestId, avg, activeCommunal,
                                 studentScores,
                                 inspectionCommentCtrl.text.trim(),
                                 isMoveOut: isMoveOut,
-                                floor: scheduleFloor);
+                                floor: scheduleFloor,
+                                disabledCommunalAreas:
+                                    disabledCommunal.toList());
                           },
                           child: const Text('평가 완료'),
                         ),
@@ -2074,6 +2271,8 @@ class _CleaningInspectionContentState
     StateSetter setDialogState,
     Color color, {
     bool isMoveOut = false,
+    // 그룹별 검사 여부 토글(공동 구역 전용). null이면 토글을 표시하지 않는다.
+    Set<String>? disabledGroups,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2094,152 +2293,199 @@ class _CleaningInspectionContentState
         ),
         const SizedBox(height: 10),
         ...structure.entries.map((category) {
+          final isDisabled = disabledGroups?.contains(category.key) ?? false;
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  category.key,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade700,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      category.key,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isDisabled
+                            ? Colors.grey.shade400
+                            : Colors.grey.shade700,
+                      ),
+                    ),
+                    // 검사 불가한 구역은 토글을 꺼서 평가에서 제외한다.
+                    if (disabledGroups != null) ...[
+                      const Spacer(),
+                      Text(
+                        isDisabled ? '검사 안 함' : '검사',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDisabled
+                              ? Colors.grey.shade400
+                              : color,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Transform.scale(
+                        scale: 0.75,
+                        child: Switch(
+                          value: !isDisabled,
+                          activeThumbColor: color,
+                          onChanged: (on) => setDialogState(() {
+                            if (on) {
+                              disabledGroups.remove(category.key);
+                            } else {
+                              disabledGroups.add(category.key);
+                            }
+                          }),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 6),
-                ...category.value.map((item) {
-                  final key = '${category.key}_$item';
-                  final score = scores[key] ?? (isMoveOut ? 1 : 4);
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Row(
+                // 검사하지 않는 그룹은 입력을 막고 흐리게 표시한다.
+                Opacity(
+                  opacity: isDisabled ? 0.4 : 1.0,
+                  child: IgnorePointer(
+                    ignoring: isDisabled,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          flex: 2,
-                          child: Text(
-                            item,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey.shade800,
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          flex: 3,
-                          child: isMoveOut
-                              ? Row(
-                                  children: [
-                                    Expanded(
-                                      child: GestureDetector(
-                                        onTap: () => setDialogState(() => scores[key] = 1),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(vertical: 6),
-                                          decoration: BoxDecoration(
-                                            color: score == 1
-                                                ? Colors.green.withValues(alpha: 0.15)
-                                                : Colors.grey.withValues(alpha: 0.04),
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(
-                                              color: score == 1 ? Colors.green : Colors.grey.withValues(alpha: 0.3),
-                                              width: score == 1 ? 2 : 1,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'O',
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: score == 1 ? FontWeight.bold : FontWeight.normal,
-                                              color: score == 1 ? Colors.green : Colors.grey.shade600,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: GestureDetector(
-                                        onTap: () => setDialogState(() => scores[key] = 0),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(vertical: 6),
-                                          decoration: BoxDecoration(
-                                            color: score == 0
-                                                ? Colors.red.withValues(alpha: 0.15)
-                                                : Colors.grey.withValues(alpha: 0.04),
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(
-                                              color: score == 0 ? Colors.red : Colors.grey.withValues(alpha: 0.3),
-                                              width: score == 0 ? 2 : 1,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'X',
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: score == 0 ? FontWeight.bold : FontWeight.normal,
-                                              color: score == 0 ? Colors.red : Colors.grey.shade600,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Row(
-                                  children: List.generate(4, (i) {
-                                    final val = i + 1;
-                                    final isSelected = score == val;
-                                    final Color btnColor = val == 4
-                                        ? Colors.green
-                                        : val == 3
-                                            ? Colors.blue
-                                            : val == 2
-                                                ? Colors.orange
-                                                : Colors.red;
-                                    return Expanded(
-                                      child: GestureDetector(
-                                        onTap: () =>
-                                            setDialogState(() => scores[key] = val),
-                                        child: Container(
-                                          margin: EdgeInsets.only(left: i == 0 ? 0 : 4),
-                                          padding: const EdgeInsets.symmetric(vertical: 6),
-                                          decoration: BoxDecoration(
-                                            color: isSelected
-                                                ? btnColor.withValues(alpha: 0.15)
-                                                : Colors.grey.withValues(alpha: 0.04),
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(
-                                              color: isSelected
-                                                  ? btnColor
-                                                  : Colors.grey.withValues(alpha: 0.3),
-                                              width: isSelected ? 2 : 1,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            '$val점',
-                                            textAlign: TextAlign.center,
-                                            style: TextStyle(
-                                              fontSize: 11,
-                                              fontWeight: isSelected
-                                                  ? FontWeight.bold
-                                                  : FontWeight.normal,
-                                              color: isSelected
-                                                  ? btnColor
-                                                  : Colors.grey.shade600,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    );
-                                  }),
+                    ...category.value.map((item) {
+                      final key = '${category.key}_$item';
+                      final score = scores[key] ?? (isMoveOut ? 1 : 4);
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                item,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade800,
                                 ),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 3,
+                              child: isMoveOut
+                                  ? Row(
+                                      children: [
+                                        Expanded(
+                                          child: GestureDetector(
+                                            onTap: () => setDialogState(() => scores[key] = 1),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: score == 1
+                                                    ? Colors.green.withValues(alpha: 0.15)
+                                                    : Colors.grey.withValues(alpha: 0.04),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: score == 1 ? Colors.green : Colors.grey.withValues(alpha: 0.3),
+                                                  width: score == 1 ? 2 : 1,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                'O',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: score == 1 ? FontWeight.bold : FontWeight.normal,
+                                                  color: score == 1 ? Colors.green : Colors.grey.shade600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: GestureDetector(
+                                            onTap: () => setDialogState(() => scores[key] = 0),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: score == 0
+                                                    ? Colors.red.withValues(alpha: 0.15)
+                                                    : Colors.grey.withValues(alpha: 0.04),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: score == 0 ? Colors.red : Colors.grey.withValues(alpha: 0.3),
+                                                  width: score == 0 ? 2 : 1,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                'X',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: score == 0 ? FontWeight.bold : FontWeight.normal,
+                                                  color: score == 0 ? Colors.red : Colors.grey.shade600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  : Row(
+                                      children: List.generate(4, (i) {
+                                        final val = i + 1;
+                                        final isSelected = score == val;
+                                        final Color btnColor = val == 4
+                                            ? Colors.green
+                                            : val == 3
+                                                ? Colors.blue
+                                                : val == 2
+                                                    ? Colors.orange
+                                                    : Colors.red;
+                                        return Expanded(
+                                          child: GestureDetector(
+                                            onTap: () =>
+                                                setDialogState(() => scores[key] = val),
+                                            child: Container(
+                                              margin: EdgeInsets.only(left: i == 0 ? 0 : 4),
+                                              padding: const EdgeInsets.symmetric(vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: isSelected
+                                                    ? btnColor.withValues(alpha: 0.15)
+                                                    : Colors.grey.withValues(alpha: 0.04),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: isSelected
+                                                      ? btnColor
+                                                      : Colors.grey.withValues(alpha: 0.3),
+                                                  width: isSelected ? 2 : 1,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                '$val점',
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: isSelected
+                                                      ? FontWeight.bold
+                                                      : FontWeight.normal,
+                                                  color: isSelected
+                                                      ? btnColor
+                                                      : Colors.grey.shade600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      }),
+                                    ),
+                            ),
+                          ],
                         ),
+                      );
+                    }),
                       ],
                     ),
-                  );
-                }),
+                  ),
+                ),
               ],
             ),
           );
@@ -2256,7 +2502,11 @@ class _CleaningInspectionContentState
     String inspectionComment, {
     bool isMoveOut = false,
     String? floor,
+    List<String>? disabledCommunalAreas,
   }) async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
     try {
       final needsRecheck = isMoveOut
           ? (studentScores.values.expand((m) => m.values).any((v) => v == 0) ||
@@ -2281,6 +2531,9 @@ class _CleaningInspectionContentState
         'evaluatedAt': Timestamp.now(),
         'updatedAt': Timestamp.now(),
         'scoresCommunal': communalScores,
+        // 검사하지 않은 공동구역 그룹(평가에서 제외됨). 재평가 시 상태를 복원한다.
+        if (disabledCommunalAreas != null && disabledCommunalAreas.isNotEmpty)
+          'disabledCommunalAreas': disabledCommunalAreas,
         'scoresPersonal': {
           for (final e in studentScores.entries) e.key: e.value,
         },
@@ -2290,7 +2543,13 @@ class _CleaningInspectionContentState
         'evaluatedByName': evaluatedByName ?? currentUser?.email,
       };
       await _firestore.collection('cleaning_requests').doc(requestId).update(updateData);
-      await _loadRequests();
+
+      // 퇴사검사를 재검사 없이(올패스) 통과하면 학생 상태를 '만기퇴사'로 자동 변경한다.
+      if (isMoveOut && !needsRecheck) {
+        await _applyMoveOutStatus(requestId);
+      }
+
+      await _loadRequests(showLoading: false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -2308,6 +2567,8 @@ class _CleaningInspectionContentState
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -2361,6 +2622,32 @@ class _CleaningInspectionContentState
           SnackBar(content: Text('오류: $e'), backgroundColor: Colors.red),
         );
       }
+    }
+  }
+
+  /// 퇴사검사 올패스 시 신청 학생의 재실상태를 '만기퇴사'로 변경한다.
+  /// 이미 퇴사 계열 상태이면 덮어쓰지 않는다(강제퇴사 등 수동 지정 값 보호).
+  Future<void> _applyMoveOutStatus(String requestId) async {
+    try {
+      final reqDoc =
+          await _firestore.collection('cleaning_requests').doc(requestId).get();
+      final uid = (reqDoc.data()?['userId'] as String?) ?? '';
+      if (uid.isEmpty) return;
+
+      final userRef = _firestore.collection('users').doc(uid);
+      final userDoc = await userRef.get();
+      if (!userDoc.exists) return;
+
+      final current = (userDoc.data()?['residentStatus'] as String?) ?? '재실중';
+      const moveOutStatuses = {'퇴사', '만기퇴사', '자진퇴사', '강제퇴사', '영구퇴사'};
+      if (moveOutStatuses.contains(current)) return;
+
+      await userRef.update({
+        'residentStatus': '만기퇴사',
+        'residentStatusUpdatedAt': Timestamp.now(),
+      });
+    } catch (e) {
+      debugPrint('퇴사검사 통과 후 상태 변경 실패: $e');
     }
   }
 
@@ -2438,10 +2725,16 @@ class _RoomInspectionHistoryContentState
   Map<String, String> _userFloorLabels = {};
   Set<String> _occupiedRoomKeys = {}; // 거주 학생이 있는 호실 키('건물|호실')
   Map<String, int> _residentCountByRoom = {}; // 호실 키('건물|호실') → 현재 거주 인원 수
+  // '건물|호실' → 재실중인 학생 목록 [{uid, name, seatNumber}] : 월검사 대리신청 시 신청자 선택용
+  Map<String, List<Map<String, String>>> _residentsByRoom = {};
   // 퇴사검사 그룹 키('건물|호실|uid') → {name} : 학생 정보
   Map<String, Map<String, String>> _personInfoByKey = {};
 
   bool _isLoading = true;
+  // 신청 등으로 목록을 다시 불러와도 보고 있던 위치를 유지한다.
+  final _listScrollController = ScrollController();
+  // 층장 대리 신청 처리 중 여부 — 연타로 중복 신청되는 것을 막는다.
+  bool _isSubmitting = false;
   String _errorMessage = '';
   String? _floorFilter;
   // 스케줄 필터 값: 'sid:신청' 또는 'sid:미신청'
@@ -2466,6 +2759,7 @@ class _RoomInspectionHistoryContentState
 
   @override
   void dispose() {
+    _listScrollController.dispose();
     super.dispose();
   }
 
@@ -2614,8 +2908,11 @@ class _RoomInspectionHistoryContentState
   }
 
   // ── 데이터 로드 ──
-  Future<void> _loadData() async {
-    setState(() { _isLoading = true; _errorMessage = ''; });
+  Future<void> _loadData({bool showLoading = true}) async {
+    setState(() {
+      if (showLoading) _isLoading = true;
+      _errorMessage = '';
+    });
     try {
       final requestsSnap = await _firestore.collection('cleaning_requests').get();
       final schedulesSnap = await _firestore.collection('cleaning_schedules').get();
@@ -2635,6 +2932,7 @@ class _RoomInspectionHistoryContentState
       final userResidentStatuses = <String, String>{};
       final occupiedRoomKeys = <String>{};
       final residentCountByRoom = <String, int>{};
+      final residentsByRoom = <String, List<Map<String, String>>>{};
       for (final doc in usersSnap.docs) {
         final data = doc.data();
         final seat = data['seatNumber']?.toString();
@@ -2649,6 +2947,11 @@ class _RoomInspectionHistoryContentState
         if (residentStatus == '재실중') {
           occupiedRoomKeys.add(roomKey);
           residentCountByRoom[roomKey] = (residentCountByRoom[roomKey] ?? 0) + 1;
+          residentsByRoom.putIfAbsent(roomKey, () => []).add({
+            'uid': doc.id,
+            'name': data['name']?.toString() ?? '',
+            'seatNumber': seat ?? '',
+          });
         }
         final String floorNum;
         if (room.length == 3) {
@@ -2845,6 +3148,7 @@ class _RoomInspectionHistoryContentState
           _userFloorLabels = userFloorLabels;
           _occupiedRoomKeys = occupiedRoomKeys;
           _residentCountByRoom = residentCountByRoom;
+          _residentsByRoom = residentsByRoom;
           _personInfoByKey = personInfoByKey;
           _isLoading = false;
         });
@@ -3047,6 +3351,7 @@ class _RoomInspectionHistoryContentState
               : RefreshIndicator(
                   onRefresh: _loadData,
                   child: ListView.builder(
+                    controller: _listScrollController,
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                     itemCount: rooms.length,
                     itemBuilder: (context, index) => _buildRoomCard(rooms[index]),
@@ -3054,6 +3359,29 @@ class _RoomInspectionHistoryContentState
                 ),
         ),
       ],
+    );
+  }
+
+  /// 대기중(평가 전) 신청에 남긴 층장 메모를 카드에 표시한다.
+  Widget _buildPendingMemo(String memo) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.sticky_note_2_outlined,
+              size: 12, color: Colors.orange.shade700),
+          const SizedBox(width: 3),
+          Expanded(
+            child: Text(
+              memo,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11, color: Colors.orange.shade800),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -3085,6 +3413,19 @@ class _RoomInspectionHistoryContentState
       latestData = raw['inspectionType'] != null
           ? raw
           : {...raw, 'inspectionType': widget.fixedType ?? 'monthly'};
+    }
+
+    // 아직 평가 전(대기중)인 신청에 층장 메모가 있으면 카드에 함께 보여준다.
+    String? pendingMemo;
+    for (final r in requests) {
+      final d = r.data() as Map<String, dynamic>;
+      final st = (d['status'] ?? 'pending') as String;
+      if (st == 'completed' || st == 'rejected') continue;
+      final m = (d['memo'] as String?)?.trim();
+      if (m != null && m.isNotEmpty) {
+        pendingMemo = m;
+        break;
+      }
     }
 
     final isOccupied = personUid != null
@@ -3120,7 +3461,12 @@ class _RoomInspectionHistoryContentState
         ? shalomRoomCapacity(roomNumber)
         : null;
 
+    // 퇴사검사(사람 단위): 학생 uid가 있어야 대리 신청이 가능하다.
     final isMishinchung = showAsMishinchung && personUid != null && !isUnregisteredStudent;
+    // 월검사(호실 단위): 그룹 키에 uid가 없으므로 호실의 재실 학생 유무로 판단한다.
+    final isMonthlyMishinchung = showAsMishinchung &&
+        personUid == null &&
+        (_residentsByRoom[key]?.isNotEmpty ?? false);
 
     // 점검 대기중인 활성 스케줄의 날짜/시간 찾기
     String? scheduleDateTime;
@@ -3191,6 +3537,8 @@ class _RoomInspectionHistoryContentState
                             '$building  점검 ${requests.length}회',
                             style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                           ),
+                          // 대기중 신청의 층장 메모
+                          if (pendingMemo != null) _buildPendingMemo(pendingMemo),
                         ],
                       )
                     : Column(
@@ -3228,6 +3576,8 @@ class _RoomInspectionHistoryContentState
                             '$building  점검 ${requests.length}회',
                             style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                           ),
+                          // 대기중 신청의 층장 메모
+                          if (pendingMemo != null) _buildPendingMemo(pendingMemo),
                         ],
                       ),
               ),
@@ -3256,8 +3606,24 @@ class _RoomInspectionHistoryContentState
                             minimumSize: Size.zero,
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
-                          onPressed: () => _showApplyScheduleDialog(key, personUid),
+                          onPressed: _isSubmitting
+                              ? null
+                              : () => _showApplyScheduleDialog(key, personUid),
                           child: const Text('층장신청', style: TextStyle(fontSize: 12)),
+                        )
+                      // 월검사(호실 단위)는 그룹 키에 uid가 없으므로 호실의 재실 학생 중
+                      // 대표 신청자를 골라 기존 스케줄에 대리 신청한다.
+                      else if (isMonthlyMishinchung)
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: _isSubmitting
+                              ? null
+                              : () => _showMonthlyApplyFlow(key),
+                          child: const Text('기간외신청', style: TextStyle(fontSize: 12)),
                         )
                       else
                         const Icon(Icons.chevron_right, color: Colors.grey),
@@ -3273,13 +3639,83 @@ class _RoomInspectionHistoryContentState
   }
 
   // ── 층장 대리 신청 ──
-  Future<void> _showApplyScheduleDialog(String key, String? uid) async {
+  /// 월검사 대리 신청: 월검사는 호실 단위이므로 그룹 키에 uid가 없다.
+  /// 해당 호실의 재실 학생 중 신청자를 고른 뒤(1명이면 자동 선택) 스케줄 선택으로 넘어간다.
+  Future<void> _showMonthlyApplyFlow(String key) async {
+    final residents = _residentsByRoom[key] ?? const <Map<String, String>>[];
+    if (residents.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('이 호실에 재실중인 학생이 없어 대리 신청할 수 없습니다')),
+      );
+      return;
+    }
+
+    String? uid;
+    if (residents.length == 1) {
+      uid = residents.first['uid'];
+    } else {
+      // 신청 문서는 학생 1명 기준으로 저장되므로 대표 신청자를 지정받는다.
+      uid = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('신청자 선택'),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '월검사 신청은 학생 1명 기준으로 접수됩니다. 대표 신청자를 선택해주세요.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 8),
+                ...residents.map((r) {
+                  final seat = (r['seatNumber'] ?? '').isNotEmpty
+                      ? ' (자리 ${r['seatNumber']})'
+                      : '';
+                  return ListTile(
+                    title: Text('${r['name']}$seat'),
+                    onTap: () => Navigator.pop(ctx, r['uid']),
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('취소'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (uid == null || !mounted) return;
+    await _showApplyScheduleDialog(key, uid, inspectionType: 'monthly');
+  }
+
+  /// [inspectionType]이 'move_out'이면 퇴사검사, 'monthly'면 월검사 스케줄을 보여준다.
+  Future<void> _showApplyScheduleDialog(
+    String key,
+    String? uid, {
+    String inspectionType = 'move_out',
+  }) async {
     if (uid == null) return;
-    // move_out 스케줄 목록 구성 (해당 학생 호실의 실제 구역으로 자동 필터)
+    final isMonthlyApply = inspectionType == 'monthly';
+    final typeLabel = isMonthlyApply ? '기간외신청' : '퇴사검사';
+    // 해당 학생 호실의 실제 구역으로 자동 필터
     final roomFloor = _getRoomFloorOption(key);
     final schedules = _scheduleMap.entries
         .where((e) {
-          if (e.value['inspectionType'] != 'move_out') return false;
+          // 월검사 스케줄은 inspectionType이 없는 레거시 데이터도 monthly로 취급한다.
+          final t = e.value['inspectionType']?.toString();
+          final matchesType =
+              isMonthlyApply ? (t == null || t == 'monthly') : t == 'move_out';
+          if (!matchesType) return false;
+          // 월검사 대리 신청은 '기간외신청'으로 만든 일정만 대상으로 한다.
+          if (isMonthlyApply && e.value['adminOnly'] != true) return false;
           if (roomFloor != null && e.value['floor'] != roomFloor) return false;
           return true;
         })
@@ -3299,8 +3735,8 @@ class _RoomInspectionHistoryContentState
         SnackBar(
           content: Text(
             roomFloor != null
-                ? '$roomFloor 구역에 등록된 퇴사검사 스케줄이 없습니다'
-                : '등록된 퇴사검사 스케줄이 없습니다',
+                ? '$roomFloor 구역에 등록된 $typeLabel 스케줄이 없습니다'
+                : '등록된 $typeLabel 스케줄이 없습니다',
           ),
         ),
       );
@@ -3310,7 +3746,7 @@ class _RoomInspectionHistoryContentState
     final selectedId = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('스케줄 선택'),
+        title: Text('$typeLabel 스케줄 선택'),
         content: SizedBox(
           width: double.maxFinite,
           child: ListView.builder(
@@ -3344,10 +3780,19 @@ class _RoomInspectionHistoryContentState
     );
 
     if (selectedId == null || !mounted) return;
-    await _submitApplyByFloorCaptain(key, uid, selectedId);
+    await _submitApplyByFloorCaptain(key, uid, selectedId,
+        inspectionType: inspectionType);
   }
 
-  Future<void> _submitApplyByFloorCaptain(String key, String uid, String scheduleId) async {
+  Future<void> _submitApplyByFloorCaptain(
+    String key,
+    String uid,
+    String scheduleId, {
+    String inspectionType = 'move_out',
+  }) async {
+    // 처리 중 재진입(중복 신청) 방지
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
     try {
       final scheduleData = _scheduleMap[scheduleId];
       if (scheduleData == null) throw Exception('스케줄 정보 없음');
@@ -3381,7 +3826,9 @@ class _RoomInspectionHistoryContentState
         'roomNumber': userData['roomNumber'] ?? '',
         'dormBuilding': dormBuilding,
         'scheduleId': scheduleId,
-        'inspectionType': 'move_out',
+        'inspectionType': inspectionType,
+        // 스케줄이 삭제돼도 기간외신청 건임을 알 수 있도록 신청 문서에도 남긴다.
+        if (scheduleData['adminOnly'] == true) 'adminOnly': true,
         'availableDates': [Timestamp.fromDate(scheduleDate)],
         'availableTimeSlot': '$startTime~$endTime',
         'availableTimeSlotLabel': '${DateFormat('MM/dd').format(scheduleDate)} $startTime~$endTime',
@@ -3403,7 +3850,7 @@ class _RoomInspectionHistoryContentState
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('신청이 완료되었습니다'), backgroundColor: Colors.green),
         );
-        await _loadData();
+        await _loadData(showLoading: false);
       }
     } catch (e) {
       if (mounted) {
@@ -3411,6 +3858,8 @@ class _RoomInspectionHistoryContentState
           SnackBar(content: Text('오류: $e'), backgroundColor: Colors.red),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -3608,8 +4057,10 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
-                          const SizedBox(height: 6),
-                          FutureBuilder<List<Map<String, dynamic>>>(
+                          // 퇴사검사는 학생 1명 기준이라 호실 거주자 목록을 그리지 않는다.
+                          if (inspectionType != 'move_out') ...[
+                            const SizedBox(height: 6),
+                            FutureBuilder<List<Map<String, dynamic>>>(
                             future: _fetchRoomStudents(),
                             builder: (context, snapshot) {
                               if (snapshot.connectionState == ConnectionState.waiting) {
@@ -3717,7 +4168,8 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
                                 }).toList(),
                               );
                             },
-                          ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -3846,9 +4298,31 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
     final inspectionType =
         (scheduleData?['inspectionType'] ?? data['inspectionType'] ?? 'monthly') as String;
     final isMoveOut = inspectionType == 'move_out';
-    final scheduleDate = (scheduleData?['date'] as Timestamp?)?.toDate();
-    final scheduleStartTime = scheduleData?['startTime'] as String?;
-    final scheduleEndTime = scheduleData?['endTime'] as String?;
+    final inspectionTypeLabel = isMoveOut ? '퇴사검사' : '월검사';
+    // 기간외신청 일정 여부. 스케줄이 삭제된 경우 신청 문서에 남긴 값으로 폴백한다.
+    final isAdminOnly =
+        (scheduleData?['adminOnly'] ?? data['adminOnly']) == true;
+    // 스케줄이 삭제되어도 검사일시를 유지하기 위해 신청 문서에 저장된 값으로 폴백한다.
+    // (availableDates: 검사일 배열, availableTimeSlot: 'HH:MM~HH:MM')
+    final fallbackDates = data['availableDates'];
+    final fallbackDate = (fallbackDates is List && fallbackDates.isNotEmpty)
+        ? (fallbackDates.first is Timestamp
+            ? (fallbackDates.first as Timestamp).toDate()
+            : null)
+        : null;
+    final scheduleDate =
+        (scheduleData?['date'] as Timestamp?)?.toDate() ?? fallbackDate;
+
+    final fallbackSlot = (data['availableTimeSlot'] as String?) ?? '';
+    final fallbackSlotParts = fallbackSlot.split('~');
+    final scheduleStartTime = (scheduleData?['startTime'] as String?) ??
+        (fallbackSlotParts.isNotEmpty && fallbackSlotParts[0].isNotEmpty
+            ? fallbackSlotParts[0]
+            : null);
+    final scheduleEndTime = (scheduleData?['endTime'] as String?) ??
+        (fallbackSlotParts.length > 1 && fallbackSlotParts[1].isNotEmpty
+            ? fallbackSlotParts[1]
+            : null);
 
     int totalFails = 0;
     int totalItems = 0;
@@ -3957,7 +4431,46 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
                               color: Colors.grey.shade700)),
                     ],
                   ),
-                if (scheduleDate != null)
+                // 검사 유형 배지 — 기간외신청 건은 '기간외' 배지로 대체하므로 생략한다.
+                if (isMoveOut || !isAdminOnly)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(4),
+                      border:
+                          Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      inspectionTypeLabel,
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.teal.shade700,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                // 기간외신청 일정으로 접수된 건(일반검사는 배지 없음)
+                if (!isMoveOut && isAdminOnly)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.purple.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                          color: Colors.purple.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(
+                      '기간외',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.purple,
+                          fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                // 점검이 완료되면 첫 줄에 검사일시가 이미 표시되므로 중복 날짜는 그리지 않는다.
+                if (scheduleDate != null && status != 'completed')
                   Text(
                     DateFormat('yyyy.MM.dd').format(scheduleDate),
                     style: TextStyle(
@@ -3989,7 +4502,7 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
                       size: 13, color: Colors.green),
                   const SizedBox(width: 5),
                   Text(
-                    '평가: ${DateFormat('yyyy.MM.dd HH:mm').format(evaluatedAt)}'
+                    '평가일시: ${DateFormat('yyyy.MM.dd HH:mm').format(evaluatedAt)}'
                     '${evaluatedByEmail != null ? ' · $evaluatedByEmail' : ''}',
                     style: TextStyle(
                         fontSize: 12, color: Colors.grey.shade600),
@@ -4023,6 +4536,27 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
                   ),
                 );
               }(),
+            ],
+            // 대리점검: 검사 당일 신청자 대신 입회한 학생
+            if (data['isProxyInspection'] == true) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(Icons.person_pin_circle_outlined,
+                      size: 13, color: Colors.deepPurple.shade400),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      '대리점검: ${(data['proxyUserName'] as String?) ?? ''}'
+                      '${(data['proxyRoomNumber'] as String?)?.isNotEmpty == true ? ' (${data['proxyRoomNumber']}호)' : ''}',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.deepPurple.shade400,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
             ],
             if (comment != null && comment.isNotEmpty) ...[
               const SizedBox(height: 6),

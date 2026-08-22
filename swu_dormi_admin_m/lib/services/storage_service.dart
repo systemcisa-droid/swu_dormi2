@@ -82,6 +82,17 @@ class StorageService {
     }
   }
 
+  // 관내점검표 항목별 사진 업로드
+  Future<String> uploadChecklistImage(File file, String fileName) async {
+    try {
+      final ref = _storage.ref().child('checklists/images/$fileName');
+      await ref.putFile(file);
+      return await ref.getDownloadURL();
+    } catch (e) {
+      throw Exception('이미지 업로드 중 오류가 발생했습니다: $e');
+    }
+  }
+
   // 프로필 이미지 업로드
   Future<String> uploadProfileImage(File file, String userId) async {
     try {

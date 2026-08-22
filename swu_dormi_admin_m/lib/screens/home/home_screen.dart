@@ -346,14 +346,14 @@ class _HomeScreenState extends State<HomeScreen> {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFFB44F4F), Color(0xFF8B3030)],
+          colors: [Color(0xFFA6BF96), Color(0xFF8B3030)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFB44F4F).withValues(alpha: 0.3),
+            color: const Color(0xFFA6BF96).withValues(alpha: 0.3),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -365,7 +365,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Text(dateStr, style: const TextStyle(color: Colors.white70, fontSize: 13)),
           const SizedBox(height: 4),
           Text(
-            '$name 님',
+            name,
             style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
           ),
           if (floor.isNotEmpty) ...[
@@ -427,7 +427,7 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(width: 8),
             _buildStatCard(
               icon: Icons.qr_code_scanner,
-              label: '출석체크',
+              label: '인원점검',
               count: _loading ? null : _activeAttendanceCount,
               subLabel: '총 $_totalAttendanceCount건',
               color: const Color(0xFF5C6BC0),
@@ -560,7 +560,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               margin: const EdgeInsets.only(bottom: 4),
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFB44F4F),
+                                color: const Color(0xFFA6BF96),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: const Text('중요', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
@@ -600,7 +600,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Icon(
         isPinned ? Icons.priority_high : Icons.campaign_outlined,
         size: 28,
-        color: isPinned ? const Color(0xFFB44F4F) : Colors.blue.shade300,
+        color: isPinned ? const Color(0xFFA6BF96) : Colors.blue.shade300,
       ),
     );
   }
@@ -634,7 +634,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(color: const Color(0xFFB44F4F), borderRadius: BorderRadius.circular(4)),
+                  decoration: BoxDecoration(color: const Color(0xFFA6BF96), borderRadius: BorderRadius.circular(4)),
                   child: const Text('중요', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                 ),
               Text(n.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, height: 1.3)),

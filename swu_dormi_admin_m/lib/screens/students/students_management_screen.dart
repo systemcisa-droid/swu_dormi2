@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:excel/excel.dart' hide Border;
+import 'package:intl/intl.dart';
 import '../../services/firestore_service.dart';
 import '../../models/student_model.dart';
 import '../../models/excel_student_row.dart';
@@ -417,7 +418,10 @@ class _StudentsManagementScreenState extends State<StudentsManagementScreen> {
   }
 
   Widget _buildStudentCard(BuildContext context, StudentModel student) {
-    final color = _dormBuildingColor(student.dormBuilding);
+    // 퇴사자는 건물 색 대신 회색으로 표시해 재실자와 구분한다.
+    final color = _isMoveOutStatus(student.residentStatus)
+        ? Colors.grey
+        : _dormBuildingColor(student.dormBuilding);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -458,11 +462,15 @@ class _StudentsManagementScreenState extends State<StudentsManagementScreen> {
                           children: [
                             Row(
                               children: [
-                                Text(
-                                  student.name,
-                                  style: const TextStyle(
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.bold,
+                                // 배지/퇴사일시가 잘리지 않도록 이름 쪽이 먼저 줄어든다.
+                                Flexible(
+                                  child: Text(
+                                    student.name,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
                                 if (student.residentStatus.isNotEmpty && student.residentStatus != '재실중') ...[
@@ -482,6 +490,21 @@ class _StudentsManagementScreenState extends State<StudentsManagementScreen> {
                                       ),
                                     ),
                                   ),
+                                  // 퇴사자는 퇴사 처리된 일시를 함께 보여준다.
+                                  if (_isMoveOutStatus(student.residentStatus)) ...[
+                                    const SizedBox(width: 6),
+                                    Icon(Icons.schedule,
+                                        size: 12, color: Colors.grey.shade500),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      student.residentStatusUpdatedAt != null
+                                          ? DateFormat('MM.dd HH:mm')
+                                              .format(student.residentStatusUpdatedAt!)
+                                          : '퇴사일시 미기록',
+                                      style: TextStyle(
+                                          fontSize: 11, color: Colors.grey.shade600),
+                                    ),
+                                  ],
                                 ],
                               ],
                             ),
@@ -505,13 +528,6 @@ class _StudentsManagementScreenState extends State<StudentsManagementScreen> {
                                   Text(
                                     student.seatNumber!,
                                     style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                                  ),
-                                ],
-                                if (student.dormBuilding != null && student.dormBuilding!.isNotEmpty) ...[
-                                  Text('  ·  ', style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
-                                  Text(
-                                    student.dormBuilding!,
-                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontWeight: FontWeight.w500),
                                   ),
                                 ],
                               ],

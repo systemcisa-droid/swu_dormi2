@@ -6,6 +6,10 @@ import 'package:swu_dormi_admin/screens/windows/windows_cleaning_inspection_curr
 import 'package:swu_dormi_admin/screens/windows/windows_cleaning_inspection_history_screen.dart';
 
 // ──────────── 점검 구역 목록 (파일 공통) ────────────
+/// 목록 화면의 기본 구역 필터.
+/// 전체(850명 규모)를 한 번에 불러오면 초기 로딩이 느려지므로 한 구역으로 시작한다.
+const String kDefaultFloorFilter = '샬롬하우스 A동 2층';
+
 const List<String> kFloorOptions = [
   '샬롬하우스 A동 2층',
   '샬롬하우스 A동 3층',

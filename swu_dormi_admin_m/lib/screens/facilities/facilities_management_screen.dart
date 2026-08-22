@@ -75,21 +75,35 @@ class _FacilitiesManagementScreenState
   @override
   void initState() {
     super.initState();
-    _loadDormBuildingMap();
+
   }
 
-  Future<void> _loadDormBuildingMap() async {
-    try {
-      final snap = await FirebaseFirestore.instance.collection('users').get();
-      if (!mounted) return;
-      final map = <String, String>{};
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        final dormBuilding = (data['dormBuilding'] as String?) ?? '';
-        if (dormBuilding.isNotEmpty) map[doc.id] = dormBuilding;
-      }
-      setState(() => _dormBuildingMap = map);
-    } catch (_) {}
+  /// 신고에 등장하는 사용자의 기숙사 정보만 조회한다.
+  /// 전체 사용자를 읽으면 학생 수만큼 read가 발생하므로 필요한 uid만 묶어 읽는다.
+  Future<void> _loadDormBuildingMap(Iterable<String> userIds) async {
+    final targets = userIds
+        .where((id) => id.isNotEmpty && !_dormBuildingMap.containsKey(id))
+        .toSet()
+        .toList();
+    if (targets.isEmpty) return;
+
+    final map = <String, String>{};
+    // whereIn은 최대 30개까지 지원하므로 청크로 나눈다.
+    for (var i = 0; i < targets.length; i += 30) {
+      final chunk = targets.sublist(i, (i + 30).clamp(0, targets.length));
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+        for (final doc in snap.docs) {
+          final dormBuilding = (doc.data()['dormBuilding'] as String?) ?? '';
+          if (dormBuilding.isNotEmpty) map[doc.id] = dormBuilding;
+        }
+      } catch (_) {}
+    }
+    if (!mounted || map.isEmpty) return;
+    setState(() => _dormBuildingMap = {..._dormBuildingMap, ...map});
   }
 
   @override
@@ -195,6 +209,7 @@ class _FacilitiesManagementScreenState
               status: _selectedStatus,
               service: _firestoreService,
               dormBuildingMap: _dormBuildingMap,
+              onUserIds: _loadDormBuildingMap,
               selectedFloor: _selectedFloor,
               selectedCategory: _selectedCategory,
             ),
@@ -230,10 +245,12 @@ String? _floorFromReport(FacilityReportModel report, Map<String, String> dormBui
 }
 
 // ── 신청 목록 ──
-class _ReportList extends StatelessWidget {
+class _ReportList extends StatefulWidget {
   final String? status;
   final FirestoreService service;
   final Map<String, String> dormBuildingMap;
+  /// 목록에 등장하는 신고자 uid를 부모에 알려 필요한 사용자만 조회하게 한다.
+  final void Function(Iterable<String>) onUserIds;
   final String? selectedFloor;
   final String? selectedCategory;
 
@@ -241,14 +258,45 @@ class _ReportList extends StatelessWidget {
     required this.status,
     required this.service,
     required this.dormBuildingMap,
+    required this.onUserIds,
     this.selectedFloor,
     this.selectedCategory,
   });
 
   @override
+  State<_ReportList> createState() => _ReportListState();
+}
+
+class _ReportListState extends State<_ReportList> {
+  // build마다 스트림을 새로 만들면 목록이 로딩 상태로 되돌아가 스크롤이 초기화되므로
+  // 상태 필터가 바뀔 때만 다시 만든다.
+  late Stream<QuerySnapshot> _stream;
+  final _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _stream = widget.service.getRepairReports(status: widget.status);
+  }
+
+  @override
+  void didUpdateWidget(_ReportList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.status != widget.status) {
+      _stream = widget.service.getRepairReports(status: widget.status);
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<QuerySnapshot>(
-      stream: service.getRepairReports(status: status),
+      stream: _stream,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -270,16 +318,22 @@ class _ReportList extends StatelessWidget {
           );
         }
 
+        // 빌드 중 setState를 피하기 위해 프레임 이후에 사용자 정보를 채운다.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          widget.onUserIds(snapshot.data!.docs
+              .map((d) => (d.data() as Map<String, dynamic>)['userId'] as String? ?? ''));
+        });
+
         var reports = snapshot.data!.docs
             .map((doc) => FacilityReportModel.fromFirestore(doc))
             .toList()
           ..sort((a, b) => b.reportedAt.compareTo(a.reportedAt));
 
-        if (selectedFloor != null) {
-          reports = reports.where((r) => _floorFromReport(r, dormBuildingMap) == selectedFloor).toList();
+        if (widget.selectedFloor != null) {
+          reports = reports.where((r) => _floorFromReport(r, widget.dormBuildingMap) == widget.selectedFloor).toList();
         }
-        if (selectedCategory != null) {
-          reports = reports.where((r) => r.category == selectedCategory).toList();
+        if (widget.selectedCategory != null) {
+          reports = reports.where((r) => r.category == widget.selectedCategory).toList();
         }
 
         if (reports.isEmpty) {
@@ -297,9 +351,11 @@ class _ReportList extends StatelessWidget {
         }
 
         return ListView.builder(
+          controller: _scrollController,
           padding: const EdgeInsets.all(16),
           itemCount: reports.length,
-          itemBuilder: (_, i) => _ReportCard(report: reports[i], dormBuildingMap: dormBuildingMap),
+          itemBuilder: (_, i) =>
+              _ReportCard(report: reports[i], dormBuildingMap: widget.dormBuildingMap),
         );
       },
     );
@@ -553,6 +609,8 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
   }
 
   Future<void> _updateStatus() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     setState(() => _isLoading = true);
     try {
       await FirestoreService().updateRepairReportStatus(

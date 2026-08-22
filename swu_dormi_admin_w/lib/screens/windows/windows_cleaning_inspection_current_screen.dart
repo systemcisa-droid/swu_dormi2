@@ -21,6 +21,8 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
   List<QueryDocumentSnapshot> _requests = [];
   Map<String, String> _userDormBuildings = {}; // userId → dormBuilding
   bool _isLoadingSchedules = true;
+  // 평가 제출 처리 중 여부 — 연타로 중복 제출되는 것을 막는다.
+  bool _isSubmitting = false;
   bool _isLoadingRequests = true;
 
   // fixedType이 있으면 해당 타입 고정, 없으면 내부 필터 사용
@@ -118,12 +120,21 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
           .where((id) => id.isNotEmpty)
           .toSet();
 
+      // 한 명씩 조회하면 신청자 수만큼 네트워크 왕복이 생기므로 whereIn으로 묶어 읽는다.
+      // (whereIn은 최대 30개까지 지원하므로 청크로 나눈다)
       final Map<String, String> dormMap = {};
-      for (final uid in userIds) {
+      final uidList = userIds.toList();
+      for (var i = 0; i < uidList.length; i += 30) {
+        final chunk = uidList.sublist(i, (i + 30).clamp(0, uidList.length));
         try {
-          final userDoc = await _firestore.collection('users').doc(uid).get();
-          final dorm = userDoc.data()?['dormBuilding'] as String?;
-          if (dorm != null) dormMap[uid] = dorm;
+          final snap = await _firestore
+              .collection('users')
+              .where(FieldPath.documentId, whereIn: chunk)
+              .get();
+          for (final doc in snap.docs) {
+            final dorm = doc.data()['dormBuilding'] as String?;
+            if (dorm != null) dormMap[doc.id] = dorm;
+          }
         } catch (_) {}
       }
 
@@ -354,9 +365,15 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
         }).length;
         final incompleteCount = scheduleRequests.length - completedCount;
 
+        // 기간외신청 일정: 학생은 직접 신청할 수 없고 관리자/층장 대리 신청만 가능
+        final isAdminOnlySchedule = data['adminOnly'] == true;
+
         Color statusColor;
         String statusText;
-        if (isDeadlinePassed && status == 'open') {
+        if (isAdminOnlySchedule && status == 'open' && !isDeadlinePassed) {
+          statusColor = Colors.purple;
+          statusText = '기간외신청';
+        } else if (isDeadlinePassed && status == 'open') {
           statusColor = Colors.grey;
           statusText = '신청만료';
         } else if (isNotStartedYet && status == 'open') {
@@ -773,6 +790,189 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
   }
 
   // ──────────── 신청 카드 ────────────
+  /// 퇴사검사 대리점검자를 지정한다.
+  /// 검사 당일 신청자 대신 입회할 학생으로, 기숙사 전체 학생 중에서 고른다.
+  Future<void> _showProxyPickerDialog(
+      String requestId, Map<String, dynamic> data) async {
+    final applicantId = (data['userId'] as String?) ?? '';
+
+    List<Map<String, String>> candidates = [];
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'student')
+          .get();
+      for (final doc in snap.docs) {
+        if (doc.id == applicantId) continue; // 신청자 본인 제외
+        final d = doc.data();
+        if (((d['residentStatus'] as String?) ?? '재실중') != '재실중') continue;
+        candidates.add({
+          'uid': doc.id,
+          'name': (d['name'] as String?) ?? '',
+          'dormBuilding': (d['dormBuilding'] as String?) ?? '',
+          'roomNumber': (d['roomNumber'] as String?) ?? '',
+          'seatNumber': (d['seatNumber'] as String?) ?? '',
+        });
+      }
+      candidates.sort((a, b) {
+        final da = (a['dormBuilding'] ?? '').compareTo(b['dormBuilding'] ?? '');
+        if (da != 0) return da;
+        final ra = int.tryParse(a['roomNumber'] ?? '') ?? 0;
+        final rb = int.tryParse(b['roomNumber'] ?? '') ?? 0;
+        if (ra != rb) return ra.compareTo(rb);
+        return (a['name'] ?? '').compareTo(b['name'] ?? '');
+      });
+    } catch (e) {
+      if (!mounted) return;
+      await displayInfoBar(context,
+          builder: (c, close) =>
+              InfoBar(title: Text('학생 조회 실패: $e'), severity: InfoBarSeverity.error));
+      return;
+    }
+
+    if (!mounted) return;
+    if (candidates.isEmpty) {
+      await displayInfoBar(context,
+          builder: (c, close) => const InfoBar(
+              title: Text('지정 가능한 학생이 없습니다'),
+              severity: InfoBarSeverity.warning));
+      return;
+    }
+
+    String? selectedUid = data['proxyUserId'] as String?;
+    final searchController = TextEditingController();
+    String query = '';
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          // 전체 학생이 대상이므로 이름·호실로 좁혀 찾는다.
+          final filtered = query.isEmpty
+              ? candidates
+              : candidates.where((c) {
+                  final q = query.toLowerCase();
+                  return (c['name'] ?? '').toLowerCase().contains(q) ||
+                      (c['roomNumber'] ?? '').contains(q) ||
+                      (c['dormBuilding'] ?? '').toLowerCase().contains(q);
+                }).toList();
+
+          return ContentDialog(
+          title: const Text('대리점검자 지정'),
+          constraints: const BoxConstraints(maxWidth: 460),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '검사 당일 ${data['userName'] ?? ''} 학생 대신 입회할 학생을 선택하세요.',
+                style: TextStyle(fontSize: 12, color: Colors.grey[120]),
+              ),
+              const SizedBox(height: 12),
+              TextBox(
+                controller: searchController,
+                placeholder: '이름 또는 호실로 검색',
+                prefix: const Padding(
+                  padding: EdgeInsets.only(left: 8),
+                  child: Icon(FluentIcons.search, size: 14),
+                ),
+                onChanged: (v) => setDialogState(() => query = v.trim()),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${filtered.length}명',
+                style: TextStyle(fontSize: 11, color: Colors.grey[100]),
+              ),
+              const SizedBox(height: 4),
+              SizedBox(
+                height: 260,
+                child: filtered.isEmpty
+                    ? Center(
+                        child: Text('검색 결과가 없습니다',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey[100])))
+                    : ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final c = filtered[i];
+                          final seat = (c['seatNumber'] ?? '').isNotEmpty
+                              ? ' (자리 ${c['seatNumber']})'
+                              : '';
+                          final isSelected = selectedUid == c['uid'];
+                          return ListTile.selectable(
+                            selected: isSelected,
+                            title: Text('${c['name']}$seat',
+                                style: const TextStyle(fontSize: 13)),
+                            subtitle: Text(
+                              '${c['dormBuilding']} ${c['roomNumber']}호',
+                              style: TextStyle(
+                                  fontSize: 11, color: Colors.grey[100]),
+                            ),
+                            onSelectionChange: (_) =>
+                                setDialogState(() => selectedUid = c['uid']),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+          actions: [
+            // 이미 지정된 경우 해제할 수 있게 한다.
+            if (data['isProxyInspection'] == true)
+              Button(
+                child: const Text('지정 해제'),
+                onPressed: () => Navigator.pop(ctx, '__clear__'),
+              ),
+            Button(
+              child: const Text('취소'),
+              onPressed: () => Navigator.pop(ctx),
+            ),
+            FilledButton(
+              onPressed:
+                  selectedUid == null ? null : () => Navigator.pop(ctx, selectedUid),
+              child: const Text('지정'),
+            ),
+          ],
+          );
+        },
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    try {
+      if (result == '__clear__') {
+        await _firestore.collection('cleaning_requests').doc(requestId).update({
+          'isProxyInspection': FieldValue.delete(),
+          'proxyUserId': FieldValue.delete(),
+          'proxyUserName': FieldValue.delete(),
+          'proxyRoomNumber': FieldValue.delete(),
+          'updatedAt': Timestamp.now(),
+        });
+      } else {
+        final picked = candidates.firstWhere((c) => c['uid'] == result);
+        await _firestore.collection('cleaning_requests').doc(requestId).update({
+          'isProxyInspection': true,
+          'proxyUserId': picked['uid'],
+          'proxyUserName': picked['name'],
+          'proxyRoomNumber': picked['roomNumber'],
+          'updatedAt': Timestamp.now(),
+        });
+      }
+      if (!mounted) return;
+      _loadRequests();
+      await displayInfoBar(context,
+          builder: (c, close) => InfoBar(
+              title: Text(result == '__clear__' ? '대리점검 지정을 해제했습니다' : '대리점검자를 지정했습니다'),
+              severity: InfoBarSeverity.success));
+    } catch (e) {
+      if (!mounted) return;
+      await displayInfoBar(context,
+          builder: (c, close) =>
+              InfoBar(title: Text('오류: $e'), severity: InfoBarSeverity.error));
+    }
+  }
+
   Widget _buildRequestCard(
     String requestId,
     Map<String, dynamic> data, {
@@ -940,6 +1140,46 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
                 ],
               ),
             ],
+            // 대리점검: 검사 당일 신청자 대신 입회할 학생 (관리자가 지정)
+            if (isMoveOut) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Icon(FluentIcons.contact, size: 13, color: Colors.purple),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      data['isProxyInspection'] == true
+                          ? '대리점검: ${(data['proxyUserName'] as String?) ?? ''}'
+                              '${(data['proxyRoomNumber'] as String?)?.isNotEmpty == true ? ' (${data['proxyRoomNumber']}호)' : ''}'
+                          : '대리점검: 지정 안 됨',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: data['isProxyInspection'] == true
+                            ? Colors.purple
+                            : Colors.grey[100],
+                        fontWeight: data['isProxyInspection'] == true
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Button(
+                    style: ButtonStyle(
+                      padding: WidgetStateProperty.all(
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      ),
+                    ),
+                    onPressed: () => _showProxyPickerDialog(requestId, data),
+                    child: Text(
+                      data['isProxyInspection'] == true ? '변경' : '지정',
+                      style: const TextStyle(fontSize: 11),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             if (memo != null && memo.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
@@ -1047,9 +1287,11 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
     final deadlineTimeController = TextEditingController(text: '23:00');
     final startTimeController = TextEditingController(text: '10:00');
     final endTimeController = TextEditingController(text: '12:00');
-    final capacityController = TextEditingController(text: '8');
+    final capacityController = TextEditingController(text: '6');
     String selectedFloor = kFloorOptions.first;
     String selectedInspectionType = _typeFilter ?? 'monthly';
+    // 기간외신청: 학생에게 목록은 보이지만 직접 신청은 할 수 없는 일정
+    bool isAdminOnly = false;
 
     showDialog(
       context: context,
@@ -1171,6 +1413,19 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 16),
+                Checkbox(
+                  checked: isAdminOnly,
+                  onChanged: (v) => setDialogState(() => isAdminOnly = v ?? false),
+                  content: const Text('기간외신청'),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 2),
+                  child: Text(
+                    '학생에게 목록은 보이지만 직접 신청할 수 없는 일정입니다. (관리자·층장 대리 신청만 가능)',
+                    style: TextStyle(fontSize: 11, color: Colors.grey[100]),
+                  ),
+                ),
               ],
             ),
           ),
@@ -1191,6 +1446,7 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
                   deadlineDate,
                   deadlineTimeController.text.trim(),
                   selectedInspectionType,
+                  isAdminOnly,
                 );
               },
             ),
@@ -1211,6 +1467,7 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
     DateTime deadlineDate,
     String deadlineTime,
     String inspectionType,
+    bool isAdminOnly,
   ) async {
     try {
       final asParts = applyStartTime.split(':');
@@ -1224,7 +1481,8 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
       final deadline = DateTime(deadlineDate.year, deadlineDate.month, deadlineDate.day, dlHour, dlMinute);
 
       final isMoveOut = inspectionType == 'move_out';
-      final dayCount = isMoveOut ? 1 : 4;
+      // 퇴사검사와 기간외신청 일정은 1개만, 일반 월검사는 4일 연속으로 생성한다.
+      final dayCount = (isMoveOut || isAdminOnly) ? 1 : 4;
 
       final batch = _firestore.batch();
       for (int i = 0; i < dayCount; i++) {
@@ -1242,6 +1500,8 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
           'createdAt': Timestamp.now(),
           'applicationStart': Timestamp.fromDate(applyStart),
           'applicationDeadline': Timestamp.fromDate(deadline),
+          // true면 학생 앱에서 목록은 보이되 신청 버튼이 막힌다(대리 신청 전용).
+          'adminOnly': isAdminOnly,
         });
       }
       await batch.commit();
@@ -1252,7 +1512,11 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
         context,
         builder: (context, close) {
           return InfoBar(
-            title: Text(isMoveOut ? '퇴사검사 일정이 추가되었습니다' : '4일 연속 일정이 추가되었습니다'),
+            title: Text(isMoveOut
+                ? '퇴사검사 일정이 추가되었습니다'
+                : isAdminOnly
+                    ? '기간외신청 일정이 추가되었습니다'
+                    : '4일 연속 일정이 추가되었습니다'),
             severity: InfoBarSeverity.success,
           );
         },
@@ -1957,6 +2221,9 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
     String? inspectionComment,
     String? floor,
   }) async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
     try {
       final bool needsRecheck;
       if (isMoveOut) {
@@ -1999,6 +2266,11 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
           .doc(requestId)
           .update(updateData);
 
+      // 퇴사검사를 재검사 없이(올패스) 통과하면 학생 상태를 '만기퇴사'로 자동 변경한다.
+      if (isMoveOut && !needsRecheck) {
+        await _applyMoveOutStatus(requestId);
+      }
+
       if (!mounted) return;
       _loadRequests();
       await displayInfoBar(
@@ -2021,6 +2293,34 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
           );
         },
       );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  /// 퇴사검사 올패스 시 신청 학생의 재실상태를 '만기퇴사'로 변경한다.
+  /// 이미 퇴사 계열 상태이면 덮어쓰지 않는다(강제퇴사 등 수동 지정 값 보호).
+  Future<void> _applyMoveOutStatus(String requestId) async {
+    try {
+      final reqDoc =
+          await _firestore.collection('cleaning_requests').doc(requestId).get();
+      final uid = (reqDoc.data()?['userId'] as String?) ?? '';
+      if (uid.isEmpty) return;
+
+      final userRef = _firestore.collection('users').doc(uid);
+      final userDoc = await userRef.get();
+      if (!userDoc.exists) return;
+
+      final current = (userDoc.data()?['residentStatus'] as String?) ?? '재실중';
+      const moveOutStatuses = {'퇴사', '만기퇴사', '자진퇴사', '강제퇴사', '영구퇴사'};
+      if (moveOutStatuses.contains(current)) return;
+
+      await userRef.update({
+        'residentStatus': '만기퇴사',
+        'residentStatusUpdatedAt': Timestamp.now(),
+      });
+    } catch (e) {
+      debugPrint('퇴사검사 통과 후 상태 변경 실패: $e');
     }
   }
 

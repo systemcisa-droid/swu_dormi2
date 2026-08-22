@@ -46,7 +46,7 @@ final kChecklistShalomB1 = ChecklistTemplate(
         CheckItem('2. 초록색 램프 항상 켜져 있어야 함'),
       ]),
     ]),
-    CheckLocation(3, '중앙 계단, 후게실표 비상 계단', [
+    CheckLocation(3, '중앙 계단, 휴게실표 비상 계단', [
       CheckSubject('계단선서등', [
         CheckItem('1. 불이 켜지는지 확인(넓이는 작동이 안되는 경우도 있음)'),
       ]),
@@ -129,12 +129,12 @@ final kChecklistShalomFloor = ChecklistTemplate(
         CheckItem('2. 초록색 램프 항상 켜져 있어야 함'),
       ]),
     ]),
-    CheckLocation(3, '중앙 계단, 후게실표 비상 계단', [
+    CheckLocation(3, '중앙 계단, 휴게실표 비상 계단', [
       CheckSubject('계단선서등', [
         CheckItem('1. 불이 켜지는지 확인(넓이는 작동이 안되는 경우도 있음)'),
       ]),
     ]),
-    CheckLocation(4, '후게홀', [
+    CheckLocation(4, '휴게홀', [
       CheckSubject('엘리베이터홀\n콘센트(1), A동 아래(4), B동 아래(8)\n시계(1), 소화기(2)', [
         CheckItem('1. 전등 껐다 켜보기'),
         CheckItem('2. 시계 건전지 교체 여부 및 고장 확인'),
@@ -168,7 +168,7 @@ final kChecklistShalomFloor = ChecklistTemplate(
         CheckItem('4. 소화기 게이지판 바늘이 초록색을 가리키면 정상\n(왼쪽방향 정상, 오른쪽방향 비정상)'),
       ]),
     ]),
-    CheckLocation(7, '후게실', [
+    CheckLocation(7, '휴게실', [
       CheckSubject('복도 끝 시계(1), 콘센트\n전자레인지(1), 소화기(1), 토스터기(1)', [
         CheckItem('1. 전등 켰다 꺼보기'),
         CheckItem('2. 시계 건전지 교체 여부 및 고장 확인'),

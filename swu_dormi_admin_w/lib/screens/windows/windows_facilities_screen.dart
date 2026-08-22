@@ -50,28 +50,31 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
   late Stream<QuerySnapshot> _reportsStream;
   Map<String, Map<String, String>> _userInfoMap = {};
   List<FacilityReportModel> _allReports = [];
+  // 목록이 다시 그려져도 보고 있던 위치를 유지한다.
+  final _listScrollController = ScrollController();
   StreamSubscription<QuerySnapshot>? _allReportsSub;
 
   @override
   void initState() {
     super.initState();
     _loadReports();
-    _loadUserInfo();
     _allReportsSub = FirebaseFirestore.instance
         .collection('facility_reports')
         .snapshots()
         .listen((snap) {
-      if (mounted) {
-        setState(() {
-          _allReports = snap.docs.map((d) => FacilityReportModel.fromFirestore(d)).toList();
-        });
-      }
+      if (!mounted) return;
+      final reports =
+          snap.docs.map((d) => FacilityReportModel.fromFirestore(d)).toList();
+      setState(() => _allReports = reports);
+      // 신고에 등장하는 사용자만 조회한다(전체 사용자를 읽지 않기 위해).
+      _loadUserInfo(reports.map((r) => r.userId));
     });
   }
 
   @override
   void dispose() {
     _allReportsSub?.cancel();
+    _listScrollController.dispose();
     super.dispose();
   }
 
@@ -176,22 +179,37 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
     }
   }
 
-  Future<void> _loadUserInfo() async {
-    try {
-      final snap = await FirebaseFirestore.instance.collection('users').get();
-      if (!mounted) return;
-      final map = <String, Map<String, String>>{};
-      for (final doc in snap.docs) {
-        final data = doc.data();
-        map[doc.id] = {
-          'dormBuilding': (data['dormBuilding'] as String?) ?? '',
-          'studentId': (data['studentId'] as String?) ?? '',
-          'building': (data['building'] as String?) ?? '',
-          'floor': (data['floor'] as String?) ?? '',
-        };
-      }
-      setState(() => _userInfoMap = map);
-    } catch (_) {}
+  /// 신고에 등장하는 사용자 정보만 조회해 채운다.
+  /// 전체 사용자를 읽으면 학생 수만큼 read가 발생하므로 필요한 uid만 묶어 읽는다.
+  Future<void> _loadUserInfo(Iterable<String> userIds) async {
+    final targets = userIds
+        .where((id) => id.isNotEmpty && !_userInfoMap.containsKey(id))
+        .toSet()
+        .toList();
+    if (targets.isEmpty) return;
+
+    final map = <String, Map<String, String>>{};
+    // whereIn은 최대 30개까지 지원하므로 청크로 나눈다.
+    for (var i = 0; i < targets.length; i += 30) {
+      final chunk = targets.sublist(i, (i + 30).clamp(0, targets.length));
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('users')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+        for (final doc in snap.docs) {
+          final data = doc.data();
+          map[doc.id] = {
+            'dormBuilding': (data['dormBuilding'] as String?) ?? '',
+            'studentId': (data['studentId'] as String?) ?? '',
+            'building': (data['building'] as String?) ?? '',
+            'floor': (data['floor'] as String?) ?? '',
+          };
+        }
+      } catch (_) {}
+    }
+    if (!mounted || map.isEmpty) return;
+    setState(() => _userInfoMap = {..._userInfoMap, ...map});
   }
 
   Future<void> _fetchUserDormBuilding(String userId) async {
@@ -508,11 +526,11 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                   ),
                 );
 
-                // 선택된 리포트 초기화 후 목록 새로고침
+                // 실시간 스트림이라 변경은 자동 반영된다.
+                // 여기서 스트림을 다시 만들면 목록이 로딩 상태로 되돌아가 스크롤이 초기화되므로 하지 않는다.
                 setState(() {
                   _selectedReport = null;
                 });
-                _loadReports();
               } catch (e) {
                 if (!mounted) return;
                 Navigator.pop(this.context);
@@ -729,6 +747,7 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                         }
 
                         return ListView.builder(
+                          controller: _listScrollController,
                           padding: const EdgeInsets.all(16),
                           itemCount: reports.length,
                           itemBuilder: (context, index) {

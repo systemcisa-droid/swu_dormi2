@@ -247,12 +247,14 @@ class FirestoreService {
   }
 
   // 식단표 관리
-  Future<void> addMeal(Map<String, dynamic> mealData) async {
+  /// 생성된 식단표 문서 ID를 반환한다(알림에 대상 식단표를 담기 위함).
+  Future<String> addMeal(Map<String, dynamic> mealData) async {
     try {
-      await meals.add({
+      final ref = await meals.add({
         ...mealData,
         'createdAt': FieldValue.serverTimestamp(),
       });
+      return ref.id;
     } catch (e) {
       throw Exception('식단표 추가 중 오류가 발생했습니다: $e');
     }

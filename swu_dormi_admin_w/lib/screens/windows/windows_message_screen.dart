@@ -270,6 +270,8 @@ class _WindowsMessageScreenState extends State<WindowsMessageScreen> {
   }
 
   Future<void> _sendMessage() async {
+    // 처리 중 재진입(중복 발송) 방지
+    if (_isSending) return;
     if (_titleController.text.trim().isEmpty) {
       displayInfoBar(
         context,
@@ -692,6 +694,7 @@ class _WindowsMessageScreenState extends State<WindowsMessageScreen> {
                           const SizedBox(height: 8),
                           TextBox(
                             controller: _titleController,
+                            enabled: !_isSending,
                             placeholder: '메시지 제목을 입력하세요',
                             maxLines: 1,
                           ),
@@ -701,6 +704,7 @@ class _WindowsMessageScreenState extends State<WindowsMessageScreen> {
                           Expanded(
                             child: TextBox(
                               controller: _messageController,
+                              enabled: !_isSending,
                               placeholder: '메시지 내용을 입력하세요',
                               maxLines: null,
                               expands: true,

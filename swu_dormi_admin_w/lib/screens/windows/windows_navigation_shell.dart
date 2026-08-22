@@ -35,6 +35,7 @@ import 'package:swu_dormi_admin/screens/windows/windows_work_schedule_screen.dar
 import 'package:swu_dormi_admin/screens/windows/windows_board_screen.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_interns_screen.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_reports_screen.dart';
+import 'package:swu_dormi_admin/screens/windows/windows_reservations_screen.dart';
 
 class WindowsNavigationShell extends StatefulWidget {
   const WindowsNavigationShell({super.key});
@@ -117,9 +118,15 @@ class _WindowsNavigationShellState extends State<WindowsNavigationShell> with Wi
       ),
       PaneItem(
         icon: const Icon(FluentIcons.check_list),
-        title: const Text('출석체크'),
+        title: const Text('인원점검(화재대피)'),
         body: const WindowsAttendanceTabScreen(),
         selectedTileColor: WidgetStateProperty.all(Colors.purple.withValues(alpha: 0.1)),
+      ),
+      PaneItem(
+        icon: const Icon(FluentIcons.event_date),
+        title: const Text('세미나실 예약'),
+        body: const WindowsReservationsScreen(),
+        selectedTileColor: WidgetStateProperty.all(Colors.blue.withValues(alpha: 0.1)),
       ),
       PaneItemSeparator(),
       PaneItem(
@@ -236,7 +243,7 @@ class _WindowsNavigationShellState extends State<WindowsNavigationShell> with Wi
                 ),
               ),
               const SizedBox(width: 12),
-              const Text('샬롬하우스 관리 시스템'),
+              const Text('샬롬하우스 관리 시스템(2학기)'),
               const Spacer(),
             ],
           ),

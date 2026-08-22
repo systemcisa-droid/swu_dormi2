@@ -93,7 +93,7 @@ class _NoticeListTile extends StatelessWidget {
                       margin: const EdgeInsets.only(bottom: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFB44F4F),
+                        color: const Color(0xFFA6BF96),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: const Text(
@@ -136,7 +136,7 @@ class _NoticeListTile extends StatelessWidget {
       child: Icon(
         notice.isPinned ? Icons.priority_high : Icons.campaign_outlined,
         size: 32,
-        color: notice.isPinned ? const Color(0xFFB44F4F) : Colors.blue.shade300,
+        color: notice.isPinned ? const Color(0xFFA6BF96) : Colors.blue.shade300,
       ),
     );
   }
@@ -175,7 +175,7 @@ class _NoticeListTile extends StatelessWidget {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFB44F4F),
+                    color: const Color(0xFFA6BF96),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: const Text('중요', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),

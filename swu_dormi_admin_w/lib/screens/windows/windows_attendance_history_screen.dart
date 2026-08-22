@@ -186,12 +186,19 @@ class _WindowsAttendanceHistoryScreenState
           final adminStatus = data['adminStatus'] as String?;
           final floorStatus = data['floorStatus'] as String?;
           final floorStatusSetBy = data['floorStatusSetBy'] as String?;
-          final legacyStatus = data['manualStatus'] as String?;
-          final statuses = isStatusRecord
-              ? [adminStatus, floorStatus, if (adminStatus == null && floorStatus == null) legacyStatus]
-                  .whereType<String>()
-                  .toList()
-              : const ['재실확인'];
+          final isFireDrillEvent = event?['isFireDrill'] == true;
+          final isComplete = data['isComplete'] != false;
+
+          final String primaryStatus;
+          if (isStatusRecord && adminStatus == '외박') {
+            primaryStatus = '외박신청완료';
+          } else if (isStatusRecord) {
+            primaryStatus = floorStatus ?? adminStatus ?? '기타';
+          } else if (isFireDrillEvent) {
+            primaryStatus = isComplete ? '화재대피훈련참석' : '화재대피훈련불참';
+          } else {
+            primaryStatus = '재실확인';
+          }
 
           final values = [
             dorm,
@@ -199,7 +206,7 @@ class _WindowsAttendanceHistoryScreenState
             name,
             studentId,
             eventTitle,
-            statuses.join(' · '),
+            primaryStatus,
             checkedInAt != null ? DateFormat('yyyy.MM.dd HH:mm').format(checkedInAt) : '',
             floorStatusSetBy ?? '',
           ];
@@ -651,12 +658,18 @@ class _WindowsAttendanceHistoryScreenState
   static const _statusIcons = {
     '재실확인': FluentIcons.check_mark,
     '외박': FluentIcons.airplane,
+    '외박신청완료': FluentIcons.airplane,
+    '화재대피참석': FluentIcons.check_mark,
+    '화재대피훈련불참': FluentIcons.cancel,
     '부재': FluentIcons.contact_card,
     '외박미수정': FluentIcons.warning,
   };
   static const _statusColors = {
     '재실확인': Color(0xFF4CAF50),
     '외박': Color(0xFFFF9800),
+    '외박신청완료': Color(0xFFFF9800),
+    '화재대피참석': Color(0xFF4CAF50),
+    '화재대피훈련불참': Color(0xFFF44336),
     '부재': Color(0xFFF44336),
     '외박미수정': Color(0xFF2196F3),
   };
@@ -670,19 +683,24 @@ class _WindowsAttendanceHistoryScreenState
     final adminStatus = data['adminStatus'] as String?;
     final floorStatus = data['floorStatus'] as String?;
     final floorStatusSetBy = data['floorStatusSetBy'] as String?;
-    // 구버전 데이터 호환: manualStatus만 있는 기존 기록
-    final legacyStatus = data['manualStatus'] as String?;
-    final statuses = isStatusRecord
-        ? [adminStatus, floorStatus, if (adminStatus == null && floorStatus == null) legacyStatus]
-            .whereType<String>()
-            .toList()
-        : const ['재실확인'];
+    final isFireDrillEvent = event?['isFireDrill'] == true;
+    final isComplete = data['isComplete'] != false;
 
-    // 아이콘/색상은 층장이 처리한 최신 상태(floorStatus)를 우선 표시
-    final primaryStatus = floorStatus ?? (statuses.isNotEmpty ? statuses.first : null);
+    final String primaryStatus;
+    if (isStatusRecord && adminStatus == '외박') {
+      // 외박신청완료가 최우선 — 화재대피 참석 여부보다 먼저 표시한다.
+      primaryStatus = '외박신청완료';
+    } else if (isStatusRecord) {
+      primaryStatus = floorStatus ?? adminStatus ?? '기타';
+    } else if (isFireDrillEvent) {
+      primaryStatus = isComplete ? '화재대피참석' : '화재대피훈련불참';
+    } else {
+      primaryStatus = '재실확인';
+    }
+
     final icon = _statusIcons[primaryStatus] ?? FluentIcons.info;
     final color = _statusColors[primaryStatus] ?? Colors.grey;
-    final title = statuses.isNotEmpty ? '$eventTitle · ${statuses.join(' · ')}' : eventTitle;
+    final title = '$eventTitle · $primaryStatus';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 10),

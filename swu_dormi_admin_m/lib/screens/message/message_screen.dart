@@ -1,7 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
+import 'chat_media.dart';
+import 'chat_upload.dart';
 // captainFloor: "샬롬하우스 A동 3층"
 // roomId:       "샬롬하우스_A동_301호"
 String _toRoomId(String dormBuilding, String building, String roomNumber) =>
@@ -369,6 +374,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
   final _msgCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   final _sendingNotifier = ValueNotifier<bool>(false);
+  /// 첨부 업로드 진행 상태 (압축/업로드 중 입력창에 표시)
+  final _uploadingNotifier = ValueNotifier<String?>(null);
   int _prevDocCount = 0;
 
   @override
@@ -379,9 +386,11 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
 
   @override
   void dispose() {
+    ChatUpload.cancelCompression();
     _msgCtrl.dispose();
     _scrollCtrl.dispose();
     _sendingNotifier.dispose();
+    _uploadingNotifier.dispose();
     super.dispose();
   }
 
@@ -417,6 +426,107 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     final now = TimeOfDay.now();
     final minutes = now.hour * 60 + now.minute;
     return minutes >= 30 && minutes < 9 * 60; // 00:30(30) ~ 09:00(540)
+  }
+
+  /// 첨부(사진/영상) 선택 → 압축 → 업로드 → 메시지 전송
+  Future<void> _sendMedia({
+    required ImageSource source,
+    required bool isVideo,
+  }) async {
+    if (_isRestrictedTime()) return;
+    if (_uploadingNotifier.value != null) return;
+
+    final captainUid = FirebaseAuth.instance.currentUser?.uid ?? '';
+
+    try {
+      final picked = isVideo
+          ? await ChatUpload.pickVideo(source)
+          : await ChatUpload.pickImage(source);
+      if (picked == null) return;
+
+      File file = picked;
+      if (isVideo) {
+        _uploadingNotifier.value = '영상 압축 중...';
+        file = await ChatUpload.compressVideo(picked);
+      }
+
+      // 압축 후에도 너무 크면 중단한다.
+      if (await file.length() > ChatUpload.maxUploadBytes) {
+        _uploadingNotifier.value = null;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('파일이 너무 큽니다. 더 짧은 영상을 선택해주세요')),
+          );
+        }
+        return;
+      }
+
+      _uploadingNotifier.value = isVideo ? '영상 업로드 중...' : '사진 업로드 중...';
+      final url = await ChatUpload.upload(
+        file: file,
+        roomId: widget.roomId,
+        isVideo: isVideo,
+      );
+
+      await _firestore
+          .collection('floor_chats')
+          .doc(widget.roomId)
+          .collection('messages')
+          .add({
+        'text': '',
+        'mediaUrl': url,
+        'mediaType': isVideo ? 'video' : 'image',
+        'senderId': captainUid,
+        'senderName': '층장(${widget.assignedFloor})',
+        'roomNumber': '층장',
+        'createdAt': FieldValue.serverTimestamp(),
+        'readBy': [captainUid],
+      });
+
+      await _firestore.collection('floor_chats').doc(widget.roomId).set({
+        'lastMessage': isVideo ? '[영상]' : '[사진]',
+        'lastAt': FieldValue.serverTimestamp(),
+        'roomId': widget.roomId,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('전송 오류: $e')));
+      }
+    } finally {
+      _uploadingNotifier.value = null;
+    }
+  }
+
+  /// 첨부 방식 선택 시트
+  void _showAttachSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library, color: Colors.cyan),
+              title: const Text('사진 선택'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _sendMedia(source: ImageSource.gallery, isVideo: false);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library, color: Colors.cyan),
+              title: const Text('영상 선택'),
+              subtitle: const Text('최대 1분 · 업로드 시 압축됩니다',
+                  style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _sendMedia(source: ImageSource.gallery, isVideo: true);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _send() async {
@@ -560,6 +670,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             final senderName = data['senderName'] as String? ?? '';
             final roomNumber = data['roomNumber'] as String? ?? '';
             final text = data['text'] as String? ?? '';
+            final mediaUrl = data['mediaUrl'] as String?;
+            final mediaType = data['mediaType'] as String?;
             final ts = data['createdAt'] as Timestamp?;
             final time = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '';
 
@@ -586,6 +698,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                   roomNumber: roomNumber,
                   text: text,
                   time: time,
+                  mediaUrl: mediaUrl,
+                  mediaType: mediaType,
                 ),
               ],
             );
@@ -617,7 +731,10 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     required String roomNumber,
     required String text,
     required String time,
+    String? mediaUrl,
+    String? mediaType,
   }) {
+    final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
     final bubbleColor = isMine ? Colors.cyan.shade500 : Colors.white;
     final textColor = isMine ? Colors.white : Colors.black87;
     final nameLabel = roomNumber == '층장' ? '$senderName (층장)' : '$senderName ($roomNumber호)';
@@ -659,28 +776,39 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.62,
                     ),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      decoration: BoxDecoration(
-                        color: bubbleColor,
-                        borderRadius: BorderRadius.only(
-                          topLeft: const Radius.circular(16),
-                          topRight: const Radius.circular(16),
-                          bottomLeft: Radius.circular(isMine ? 16 : 4),
-                          bottomRight: Radius.circular(isMine ? 4 : 16),
-                        ),
-                        border: isMine ? null : Border.all(color: Colors.grey.shade200),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.06),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
+                    child: hasMedia
+                        // 첨부는 여백 없이 이미지/영상만 둥글게 보여준다.
+                        ? ChatMediaBubble(
+                            url: mediaUrl,
+                            isVideo: mediaType == 'video',
+                            maxWidth: MediaQuery.of(context).size.width * 0.62,
+                          )
+                        : Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: bubbleColor,
+                              borderRadius: BorderRadius.only(
+                                topLeft: const Radius.circular(16),
+                                topRight: const Radius.circular(16),
+                                bottomLeft: Radius.circular(isMine ? 16 : 4),
+                                bottomRight: Radius.circular(isMine ? 4 : 16),
+                              ),
+                              border: isMine
+                                  ? null
+                                  : Border.all(color: Colors.grey.shade200),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.06),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Text(text,
+                                style: TextStyle(
+                                    fontSize: 14, color: textColor, height: 1.4)),
                           ),
-                        ],
-                      ),
-                      child: Text(text,
-                          style: TextStyle(fontSize: 14, color: textColor, height: 1.4)),
-                    ),
                   ),
                   if (!isMine) ...[
                     const SizedBox(width: 6),
@@ -724,15 +852,61 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
 
     return SafeArea(
       top: false,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Colors.grey.shade200)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 압축/업로드 진행 표시
+          ValueListenableBuilder<String?>(
+            valueListenable: _uploadingNotifier,
+            builder: (_, uploading, __) {
+              if (uploading == null) return const SizedBox.shrink();
+              return Container(
+                width: double.infinity,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                color: Colors.cyan.shade50,
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.cyan.shade600,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(uploading,
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.cyan.shade800)),
+                  ],
+                ),
+              );
+            },
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Colors.grey.shade200)),
+            ),
+            child: Row(
+              children: [
+                // 첨부 버튼
+                ValueListenableBuilder<String?>(
+                  valueListenable: _uploadingNotifier,
+                  builder: (_, uploading, __) => IconButton(
+                    onPressed: uploading != null ? null : _showAttachSheet,
+                    icon: Icon(
+                      Icons.add_circle_outline,
+                      color: uploading != null
+                          ? Colors.grey.shade300
+                          : Colors.cyan.shade600,
+                    ),
+                    tooltip: '사진/영상 첨부',
+                  ),
+                ),
+                Expanded(
               child: TextField(
                 controller: _msgCtrl,
                 minLines: 1,
@@ -784,6 +958,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             ),
           ],
         ),
+          ),
+        ],
       ),
     );
   }

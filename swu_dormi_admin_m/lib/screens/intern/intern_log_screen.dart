@@ -79,11 +79,27 @@ class _InternLogScreenState extends State<InternLogScreen> {
     return total;
   }
 
-  String _formatTime(TimeOfDay t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  /// 자정 기준 분 단위를 'HH:mm' 로 변환한다.
+  /// TimeOfDay 는 hour 24 를 표현할 수 없어 분 단위로 다룬다 (24:00 = 1440).
+  String _formatMinutes(int totalMinutes) {
+    final h = totalMinutes ~/ 60;
+    final m = totalMinutes % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }
 
-  double _calcHours(TimeOfDay start, TimeOfDay end) {
-    final mins = (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute);
+  /// 'HH:mm' 문자열을 자정 기준 분으로 변환한다. 실패 시 기본값 반환.
+  int _parseMinutes(String? value, int fallback) {
+    if (value == null) return fallback;
+    final parts = value.split(':');
+    if (parts.length != 2) return fallback;
+    final h = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (h == null || m == null) return fallback;
+    return h * 60 + m;
+  }
+
+  double _calcHours(int startMinutes, int endMinutes) {
+    final mins = endMinutes - startMinutes;
     return mins > 0 ? mins / 60.0 : 0;
   }
 
@@ -93,27 +109,9 @@ class _InternLogScreenState extends State<InternLogScreen> {
 
     DateTime workDate = (existing?['workDate'] as Timestamp?)?.toDate() ?? DateTime.now();
 
-    // 기존 시작/종료 시각 파싱
-    TimeOfDay startTime = const TimeOfDay(hour: 9, minute: 0);
-    TimeOfDay endTime = const TimeOfDay(hour: 18, minute: 0);
-    if (existing?['startTime'] is String) {
-      final parts = (existing!['startTime'] as String).split(':');
-      if (parts.length == 2) {
-        startTime = TimeOfDay(
-          hour: int.tryParse(parts[0]) ?? 9,
-          minute: int.tryParse(parts[1]) ?? 0,
-        );
-      }
-    }
-    if (existing?['endTime'] is String) {
-      final parts = (existing!['endTime'] as String).split(':');
-      if (parts.length == 2) {
-        endTime = TimeOfDay(
-          hour: int.tryParse(parts[0]) ?? 18,
-          minute: int.tryParse(parts[1]) ?? 0,
-        );
-      }
-    }
+    // 기존 시작/종료 시각 파싱 (자정 기준 분 단위)
+    int startTime = _parseMinutes(existing?['startTime'] as String?, 9 * 60);
+    int endTime = _parseMinutes(existing?['endTime'] as String?, 18 * 60);
 
     // 기존 업무내용 선택 목록
     final existingTypes = existing?['workTypes'] is List
@@ -136,14 +134,11 @@ class _InternLogScreenState extends State<InternLogScreen> {
           final accumulated = _computeAccumulated(excludeId: editId) + workHours;
 
           Future<void> pickTime(bool isStart) async {
-            final picked = await showTimePicker(
-              context: ctx,
-              initialTime: isStart ? startTime : endTime,
-              initialEntryMode: TimePickerEntryMode.input,
-              builder: (context, child) => MediaQuery(
-                data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
-                child: child!,
-              ),
+            // 기본 showTimePicker 는 24:00 을 허용하지 않으므로 직접 입력받는다.
+            final picked = await _showHourMinuteDialog(
+              ctx,
+              initialMinutes: isStart ? startTime : endTime,
+              title: isStart ? '시작시간' : '종료시간',
             );
             if (picked != null) {
               setDialogState(() {
@@ -201,7 +196,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                       Expanded(
                         child: _TimePickerButton(
                           label: '시작',
-                          time: startTime,
+                          timeLabel: _formatMinutes(startTime),
                           onTap: () => pickTime(true),
                         ),
                       ),
@@ -212,7 +207,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                       Expanded(
                         child: _TimePickerButton(
                           label: '종료',
-                          time: endTime,
+                          timeLabel: _formatMinutes(endTime),
                           onTap: () => pickTime(false),
                         ),
                       ),
@@ -285,20 +280,20 @@ class _InternLogScreenState extends State<InternLogScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFB44F4F).withValues(alpha: 0.06),
-                      border: Border.all(color: const Color(0xFFB44F4F).withValues(alpha: 0.3)),
+                      color: const Color(0xFFA6BF96).withValues(alpha: 0.06),
+                      border: Border.all(color: const Color(0xFFA6BF96).withValues(alpha: 0.3)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.access_time_filled, size: 16, color: Color(0xFFB44F4F)),
+                        const Icon(Icons.access_time_filled, size: 16, color: Color(0xFFA6BF96)),
                         const SizedBox(width: 8),
                         Text(
                           '${accumulated.toStringAsFixed(1)}시간',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
-                            color: Color(0xFFB44F4F),
+                            color: Color(0xFFA6BF96),
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -359,8 +354,8 @@ class _InternLogScreenState extends State<InternLogScreen> {
   Future<void> _saveLog({
     String? id,
     required DateTime workDate,
-    required TimeOfDay startTime,
-    required TimeOfDay endTime,
+    required int startTime,
+    required int endTime,
     required double workHours,
     required List<String> workTypes,
     required double accumulatedHours,
@@ -371,8 +366,8 @@ class _InternLogScreenState extends State<InternLogScreen> {
       final payload = <String, dynamic>{
         'uid': uid,
         'workDate': Timestamp.fromDate(workDate),
-        'startTime': _formatTime(startTime),
-        'endTime': _formatTime(endTime),
+        'startTime': _formatMinutes(startTime),
+        'endTime': _formatMinutes(endTime),
         'workHours': workHours,
         'workTypes': workTypes,
         'accumulatedHours': accumulatedHours,
@@ -434,10 +429,10 @@ class _InternLogScreenState extends State<InternLogScreen> {
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  color: const Color(0xFFB44F4F).withValues(alpha: 0.08),
+                  color: const Color(0xFFA6BF96).withValues(alpha: 0.08),
                   child: Row(
                     children: [
-                      const Icon(Icons.person, color: Color(0xFFB44F4F), size: 18),
+                      const Icon(Icons.person, color: Color(0xFFA6BF96), size: 18),
                       const SizedBox(width: 6),
                       Text(
                         _userName != null && _userName!.isNotEmpty
@@ -446,7 +441,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 14,
-                          color: Color(0xFFB44F4F),
+                          color: Color(0xFFA6BF96),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -460,7 +455,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
-                          color: Color(0xFFB44F4F),
+                          color: Color(0xFFA6BF96),
                         ),
                       ),
                     ],
@@ -494,7 +489,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
         onPressed: () => _showAddDialog(),
         icon: const Icon(Icons.add),
         label: const Text('작성'),
-        backgroundColor: const Color(0xFFB44F4F),
+        backgroundColor: const Color(0xFFA6BF96),
         foregroundColor: Colors.white,
       ),
     );
@@ -524,7 +519,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFB44F4F).withValues(alpha: 0.1),
+                    color: const Color(0xFFA6BF96).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -532,7 +527,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
-                      color: Color(0xFFB44F4F),
+                      color: Color(0xFFA6BF96),
                     ),
                   ),
                 ),
@@ -616,16 +611,148 @@ class _InternLogScreenState extends State<InternLogScreen> {
   }
 }
 
-class _TimePickerButton extends StatelessWidget {
-  final String label;
-  final TimeOfDay time;
-  final VoidCallback onTap;
+/// 시/분을 직접 입력받는 다이얼로그. 자정 기준 분 단위를 주고받는다.
+///
+/// 기본 [showTimePicker] 는 시(hour)를 0~23 으로 제한해 24:00 을 입력할 수 없다.
+/// 근무 종료시각을 24:00 으로 적는 경우가 있어 직접 입력 폼을 사용한다.
+Future<int?> _showHourMinuteDialog(
+  BuildContext context, {
+  required int initialMinutes,
+  required String title,
+}) {
+  return showDialog<int>(
+    context: context,
+    builder: (ctx) => _HourMinuteDialog(
+      initialMinutes: initialMinutes,
+      title: title,
+    ),
+  );
+}
 
-  const _TimePickerButton({required this.label, required this.time, required this.onTap});
+/// 컨트롤러의 생명주기를 위젯이 직접 관리한다.
+/// (다이얼로그가 닫히는 애니메이션 도중에도 TextField 가 살아 있으므로
+///  showDialog 반환 직후 dispose 하면 안 된다)
+class _HourMinuteDialog extends StatefulWidget {
+  final int initialMinutes;
+  final String title;
+
+  const _HourMinuteDialog({
+    required this.initialMinutes,
+    required this.title,
+  });
+
+  @override
+  State<_HourMinuteDialog> createState() => _HourMinuteDialogState();
+}
+
+class _HourMinuteDialogState extends State<_HourMinuteDialog> {
+  late final TextEditingController _hourCtrl;
+  late final TextEditingController _minuteCtrl;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _hourCtrl = TextEditingController(
+        text: (widget.initialMinutes ~/ 60).toString().padLeft(2, '0'));
+    _minuteCtrl = TextEditingController(
+        text: (widget.initialMinutes % 60).toString().padLeft(2, '0'));
+  }
+
+  @override
+  void dispose() {
+    _hourCtrl.dispose();
+    _minuteCtrl.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final h = int.tryParse(_hourCtrl.text.trim());
+    final m = int.tryParse(_minuteCtrl.text.trim());
+    if (h == null || m == null || h < 0 || h > 24 || m < 0 || m > 59) {
+      setState(() => _error = '유효한 시간을 입력하세요');
+      return;
+    }
+    // 24시는 24:00 만 허용한다.
+    if (h == 24 && m != 0) {
+      setState(() => _error = '24시는 24:00 만 입력할 수 있습니다');
+      return;
+    }
+    Navigator.pop(context, h * 60 + m);
+  }
+
+  Widget _numberField(TextEditingController ctrl, {bool autofocus = false}) {
+    return SizedBox(
+      width: 70,
+      child: TextField(
+        controller: ctrl,
+        autofocus: autofocus,
+        textAlign: TextAlign.center,
+        keyboardType: TextInputType.number,
+        maxLength: 2,
+        style: const TextStyle(fontSize: 28),
+        decoration: const InputDecoration(
+          counterText: '',
+          border: OutlineInputBorder(),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final text = '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _numberField(_hourCtrl, autofocus: true),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 8),
+                child: Text(':',
+                    style:
+                        TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+              ),
+              _numberField(_minuteCtrl),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _error ?? '00:00 ~ 24:00 사이로 입력하세요',
+            style: TextStyle(
+              fontSize: 12,
+              color: _error != null ? Colors.red : Colors.grey.shade600,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('취소'),
+        ),
+        TextButton(
+          onPressed: _submit,
+          child: const Text('확인'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TimePickerButton extends StatelessWidget {
+  final String label;
+  final String timeLabel;
+  final VoidCallback onTap;
+
+  const _TimePickerButton({required this.label, required this.timeLabel, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final text = timeLabel;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(8),

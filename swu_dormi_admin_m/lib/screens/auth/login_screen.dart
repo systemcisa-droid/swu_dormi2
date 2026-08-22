@@ -28,6 +28,8 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _handleLogin() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
@@ -109,7 +111,7 @@ class _LoginScreenState extends State<LoginScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFFB44F4F),
+              Color(0xFFA6BF96),
               Color(0xFFEA9694),
             ],
           ),

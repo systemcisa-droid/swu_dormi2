@@ -35,7 +35,7 @@ class StorageService {
     }
   }
 
-  // 공지사항 이미지 업로드
+  // 공지사항 이미지 업로드 (압축 적용, 팝업 공지/인턴 공지 이미지도 공유)
   Future<String> uploadNoticeImage(File file, String fileName) async {
     try {
       print('===== 이미지 업로드 시작 =====');
@@ -44,10 +44,11 @@ class StorageService {
       print('업로드 경로: notices/images/$fileName');
       print('파일 존재 여부: ${await file.exists()}');
 
+      final compressed = await _compressImage(file);
       final ref = _storage.ref().child('notices/images/$fileName');
       print('Reference 생성 완료');
 
-      await ref.putFile(file, SettableMetadata(contentType: 'image/jpeg'));
+      await ref.putData(compressed, SettableMetadata(contentType: 'image/jpeg'));
       print('파일 업로드 완료');
 
       final downloadUrl = await ref.getDownloadURL();
@@ -107,11 +108,12 @@ class StorageService {
     }
   }
 
-  // 홈 배너 이미지 업로드
+  // 홈 배너 이미지 업로드 (압축 적용)
   Future<String> uploadHomeBanner(File file) async {
     try {
+      final compressed = await _compressImage(file);
       final ref = _storage.ref().child('settings/home_banner.jpg');
-      await ref.putFile(file);
+      await ref.putData(compressed, SettableMetadata(contentType: 'image/jpeg'));
       return await ref.getDownloadURL();
     } catch (e) {
       throw Exception('배너 이미지 업로드 중 오류가 발생했습니다: $e');

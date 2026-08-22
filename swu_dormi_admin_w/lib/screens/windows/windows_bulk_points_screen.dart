@@ -276,6 +276,8 @@ class _WindowsBulkPointsScreenState extends State<WindowsBulkPointsScreen> {
   /// 헤더: 학번, 성명(선택, 검증용), 부과일자(선택), 상벌구분, 상벌점내용, 상벌점(선택), 비고(선택)
   /// "상벌점내용" 셀은 "이름 [코드]" 또는 코드 단독 표기를 모두 허용한다.
   Future<void> _uploadExcel() async {
+    // 처리 중 재진입(중복 업로드) 방지
+    if (_isUploadingExcel) return;
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
@@ -696,6 +698,8 @@ class _WindowsBulkPointsScreenState extends State<WindowsBulkPointsScreen> {
   }
 
   Future<void> _applyPoints(List<_GridRow> rows) async {
+    // 처리 중 재진입(중복 부여) 방지
+    if (_isApplyingPoints) return;
     setState(() => _isApplyingPoints = true);
     final firestore = FirebaseFirestore.instance;
     int successCount = 0;

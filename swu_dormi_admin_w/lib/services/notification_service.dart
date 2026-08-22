@@ -75,6 +75,64 @@ class NotificationService {
     }
   }
 
+  /// 식단표가 등록되면 전체 학생에게 알림을 생성한다.
+  Future<void> sendMealNotification({
+    required String mealId,
+    required String title,
+  }) async {
+    try {
+      final students = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'student')
+          .get();
+      if (students.docs.isEmpty) return;
+
+      // 식단표 알림을 꺼둔 학생은 제외한다(설정 미저장 시 기본 꺼짐).
+      final targets = students.docs.where((doc) {
+        final settings =
+            doc.data()['notificationSettings'] as Map<String, dynamic>?;
+        if (settings == null) return false; // 설정 없음 = 기본 꺼짐
+        if (settings['all_notifications'] == false) return false;
+        return settings['meal_notifications'] == true;
+      }).toList();
+      if (targets.isEmpty) return;
+
+      // Firestore 배치는 최대 500개 쓰기까지 지원하므로 청크로 나눠 커밋한다.
+      const chunkSize = 400;
+      for (var i = 0; i < targets.length; i += chunkSize) {
+        final chunk = targets.skip(i).take(chunkSize);
+        final batch = _firestore.batch();
+        for (final student in chunk) {
+          final ref = _firestore.collection('user_notifications').doc();
+          batch.set(ref, {
+            'userId': student.id,
+            'type': 'meal',
+            'title': '식단표가 등록되었습니다',
+            'content': title,
+            'data': {'mealId': mealId},
+            'createdAt': FieldValue.serverTimestamp(),
+            'isRead': false,
+          });
+        }
+        await batch.commit();
+      }
+
+      // Cloud Function 사용 시 푸시 발송용 요청
+      await _firestore.collection('notification_requests').add({
+        'type': 'meal',
+        'mealId': mealId,
+        'title': '식단표가 등록되었습니다',
+        'body': title,
+        'data': {'type': 'meal', 'mealId': mealId},
+        'target': 'all_students',
+        'createdAt': FieldValue.serverTimestamp(),
+        'status': 'pending',
+      });
+    } catch (e) {
+      print('식단표 알림 생성 실패: $e');
+    }
+  }
+
   // 특정 학생에게 알림 전송 (외박/입퇴사 승인/거부 시)
   Future<void> sendRequestStatusNotification({
     required String userId,

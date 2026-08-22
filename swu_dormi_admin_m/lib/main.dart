@@ -60,14 +60,14 @@ class AdminApp extends StatelessWidget {
       locale: const Locale('ko', 'KR'),
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFB44F4F),
+          seedColor: const Color(0xFFA6BF96),
           brightness: Brightness.light,
         ),
         useMaterial3: true,
         appBarTheme: const AppBarTheme(
           centerTitle: true,
           elevation: 0,
-          backgroundColor: Color(0xFFB44F4F),
+          backgroundColor: Color(0xFFA6BF96),
           foregroundColor: Colors.white,
         ),
         cardTheme: CardThemeData(
@@ -339,7 +339,7 @@ class _NavigationShellState extends State<NavigationShell> {
     '수리 보수',
     '월청소 점검',
     '퇴사청소 점검',
-    '출석 체크',
+    '인원점검(화재대피훈련)',
     '관내점검표',
     '인턴근무일지',
     '층장단톡방',
@@ -424,7 +424,7 @@ class _NavigationShellState extends State<NavigationShell> {
         child: Column(
           children: [
             DrawerHeader(
-              decoration: const BoxDecoration(color: Color(0xFFB44F4F)),
+              decoration: const BoxDecoration(color: Color(0xFFA6BF96)),
               child: Align(
                 alignment: Alignment.bottomLeft,
                 child: Column(
@@ -489,7 +489,7 @@ class _NavigationShellState extends State<NavigationShell> {
             ),
             _DrawerItem(
               icon: Icons.qr_code_scanner,
-              label: '출석 체크',
+              label: '인원점검(화재대피훈련)',
               selected: _currentIndex == 5,
               onTap: () => _navigateTo(5),
             ),
@@ -542,12 +542,12 @@ class _DrawerItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? const Color(0xFFB44F4F) : null;
+    final color = selected ? const Color(0xFFA6BF96) : null;
     return ListTile(
       leading: Icon(icon, color: color),
       title: Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.bold : FontWeight.normal)),
       selected: selected,
-      selectedTileColor: const Color(0xFFB44F4F).withValues(alpha: 0.08),
+      selectedTileColor: const Color(0xFFA6BF96).withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
       onTap: onTap,
