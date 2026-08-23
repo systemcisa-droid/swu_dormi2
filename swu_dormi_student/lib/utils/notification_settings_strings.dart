@@ -23,4 +23,7 @@ class NotificationSettingsStrings {
   String get floorChatSubtitle => _t('층장단톡방 새 메시지 알림', 'New message alerts in the floor captain chat');
   String get adminMessage => _t('행정실', 'Admin Office');
   String get adminMessageSubtitle => _t('행정실에서 보낸 메시지 알림', 'Message alerts from the admin office');
+  String get boardComment => _t('게시판 댓글', 'Board Comments');
+  String get boardCommentSubtitle =>
+      _t('내 게시글에 댓글이 달렸을 때 알림', 'Alerts when someone comments on my post');
 }

@@ -21,6 +21,8 @@ class _MessageToCaptainScreenState extends State<MessageToCaptainScreen> {
   }
 
   Future<void> _sendMessage() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     final message = _messageController.text.trim();
     if (message.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -106,6 +108,7 @@ class _MessageToCaptainScreenState extends State<MessageToCaptainScreen> {
             Expanded(
               child: TextField(
                 controller: _messageController,
+                enabled: !_isLoading,
                 maxLines: null,
                 expands: true,
                 textAlignVertical: TextAlignVertical.top,

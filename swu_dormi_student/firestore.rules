@@ -238,7 +238,14 @@ service cloud.firestore {
     match /user_notifications/{notificationId} {
       allow get: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow list: if isSignedIn();
-      allow create: if isAdmin();
+      // 관리자는 모든 알림 생성 가능.
+      // 일반 사용자는 게시글 댓글 알림(board_comment)만, 다른 사람에게만 보낼 수 있다.
+      allow create: if isAdmin()
+                    || (isSignedIn()
+                        && request.resource.data.type == 'board_comment'
+                        && request.resource.data.userId is string
+                        && request.resource.data.userId != request.auth.uid
+                        && request.resource.data.isRead == false);
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
@@ -251,6 +258,16 @@ service cloud.firestore {
       allow update: if isAdmin() ||
                       (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['attendeeCount']));
       allow delete: if isAdmin();
+    }
+
+    // Seminar Room Reservations collection (세미나실 예약)
+    // 같은 날짜의 다른 학생 예약 슬롯을 확인해야 하므로 로그인 사용자는 목록 전체를 읽을 수 있다.
+    // 생성/삭제는 본인 예약에 대해서만 허용하고, 수정은 막아(예약 정정은 취소 후 재예약) 데이터 일관성을 보장한다.
+    match /seminar_room_reservations/{reservationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if false;
+      allow delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     // Attendance Records collection (출석 기록)

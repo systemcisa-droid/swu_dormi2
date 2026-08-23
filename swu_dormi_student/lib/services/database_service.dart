@@ -171,6 +171,13 @@ class DatabaseService {
         .update({'profileImageUrl': profileImageUrl});
   }
 
+  // 빈 문자열이면 별명을 제거(null)하고, 값이 있으면 그 값으로 저장한다.
+  Future<void> updateNickname(String uid, String nickname) async {
+    await _firestore.collection('users').doc(uid).update({
+      'nickname': nickname.trim().isEmpty ? null : nickname.trim(),
+    });
+  }
+
   Future<UserModel?> getUserProfile(String userId) async {
     DocumentSnapshot doc = await _firestore
         .collection('users')

@@ -25,6 +25,8 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
   List<Map<String, dynamic>> _schedules = [];
   List<Map<String, dynamic>> _requests = [];
   bool _isLoading = true;
+  // 신청/재검사 신청 처리 중 여부 — 버튼 연타로 중복 신청되는 것을 막는다.
+  bool _isSubmitting = false;
   String? _error;
   int _viewMode = 0; // 0: 스케줄, 1: 내역, 2: 안내
 
@@ -363,7 +365,9 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
     final now = DateTime.now();
     final isNotStarted = applyStart != null && now.isBefore(applyStart);
     final isDeadlinePassed = deadline != null && now.isAfter(deadline);
-    final isOpen = status == 'open' && curCount < maxCap && !hasPending && !isNotStarted && !isDeadlinePassed && !isMySchedule;
+    // adminOnly 일정은 목록에는 보이지만 학생이 직접 신청할 수 없다(대리 신청 전용).
+    final isAdminOnly = data['adminOnly'] == true;
+    final isOpen = status == 'open' && curCount < maxCap && !hasPending && !isNotStarted && !isDeadlinePassed && !isMySchedule && !isAdminOnly;
     final isMoveOut = (data['inspectionType'] as String?) == 'move_out';
     final typeColor = isMoveOut ? Colors.orange : Colors.cyan;
     final typeLabel = isMoveOut ? strs.moveOutInspectionShort : strs.monthlyInspectionShort;
@@ -371,6 +375,9 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
     final String buttonText;
     if (isMySchedule) {
       buttonText = strs.statusApplied;
+    } else if (isAdminOnly) {
+      // 대리 신청 전용 일정 — 목록에는 보이되 직접 신청은 불가
+      buttonText = strs.statusAdminOnly;
     } else if (isNotStarted) {
       buttonText = strs.statusScheduled;
     } else if (isDeadlinePassed) {
@@ -574,7 +581,9 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
     final isNotStarted = applyStart != null && now.isBefore(applyStart);
     final isDeadlinePassed = deadline != null && now.isAfter(deadline);
 
-    final isAvailable = scheduleStatus == 'open' && curCount < maxCap && !isNotStarted && !isDeadlinePassed;
+    // adminOnly 일정은 목록에는 보이지만 학생이 직접 신청할 수 없다(대리 신청 전용).
+    final isAdminOnlySchedule = schedule['adminOnly'] == true;
+    final isAvailable = scheduleStatus == 'open' && curCount < maxCap && !isNotStarted && !isDeadlinePassed && !isAdminOnlySchedule;
     final isMoveOut = (schedule['inspectionType'] as String?) == 'move_out';
     final typeColor = isMoveOut ? Colors.orange : Colors.cyan;
     final typeLabel = isMoveOut ? strs.moveOutInspectionShort : strs.monthlyInspectionShort;
@@ -819,7 +828,9 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         textStyle: const TextStyle(fontSize: 12),
                       ),
-                      onPressed: () => _submitRecheckRequest(requestId, schedule),
+                      onPressed: _isSubmitting
+                          ? null
+                          : () => _submitRecheckRequest(requestId, schedule),
                       child: Text(strs.recheckApplyAction),
                     ),
                   ),
@@ -840,6 +851,25 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                         .join(', '),
                     style: TextStyle(fontSize: 12, color: Colors.cyan.shade700),
                   ),
+                ),
+              ],
+            ),
+          ],
+          // 대리점검을 지정한 신청은 대리자를 함께 보여준다.
+          if (request['isProxyInspection'] == true) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(Icons.person_pin_circle_outlined,
+                    size: 14, color: Colors.deepPurple.shade400),
+                const SizedBox(width: 4),
+                Text(
+                  strs.proxyLabel(
+                      (request['proxyUserName'] as String?) ?? ''),
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.deepPurple.shade400,
+                      fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -890,6 +920,14 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
       final applyStart = (applyStartVal is Timestamp) ? applyStartVal.toDate() : null;
       final now = DateTime.now();
 
+      if (newSchedule['adminOnly'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(strs.adminOnlySchedule), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
       if (applyStart != null && now.isBefore(applyStart)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -972,6 +1010,9 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
   Future<void> _submitRecheckRequest(String failedRequestId, Map<String, dynamic> schedule) async {
     final strs = CleaningInspectionStrings(
         Provider.of<LocaleProvider>(context, listen: false).isEnglish);
+    // 처리 중 재진입(중복 신청) 방지
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
     try {
       final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
       if (user == null) return;
@@ -1033,6 +1074,8 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
           SnackBar(content: Text(strs.requestSubmitError), backgroundColor: Colors.red),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
@@ -1317,6 +1360,9 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
   Future<void> _submitRequest(String scheduleId, Map<String, dynamic> scheduleData, String memo, dynamic user, {List<String>? commonAreas}) async {
     final strs = CleaningInspectionStrings(
         Provider.of<LocaleProvider>(context, listen: false).isEnglish);
+    // 처리 중 재진입(중복 신청) 방지
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
     try {
       if (_getUserFloorLabel(user) == null) {
         if (mounted) {
@@ -1335,6 +1381,14 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
       final applyStart = (applyStartVal is Timestamp) ? applyStartVal.toDate() : null;
       final now = DateTime.now();
 
+      if (scheduleData['adminOnly'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(strs.adminOnlySchedule), backgroundColor: Colors.orange),
+          );
+        }
+        return;
+      }
       if (applyStart != null && now.isBefore(applyStart)) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1448,6 +1502,8 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
           SnackBar(content: Text(strs.requestSubmitError), backgroundColor: Colors.red),
         );
       }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 }

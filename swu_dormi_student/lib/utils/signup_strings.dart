@@ -14,7 +14,7 @@ class SignupStrings {
   String get emailIdInvalid => _t('학번은 숫자만 입력 가능합니다', 'Student ID must contain numbers only');
   String get emailIdLengthInvalid =>
       _t('입학연도 4자리 + 학번 6자리, 총 10자리 숫자여야 합니다', 'Must be 10 digits: 4-digit admission year + 6-digit student number');
-  String get emailIdGuide => _t('*이메일은 "학번"만 입력 가능합니다*', '*Only your "student ID number" can be entered for the email*');
+  String get emailIdGuide => _t('*이메일은 "학번(10자리)"만 입력 가능합니다*', '*Only your "student ID number(10 digits)" can be entered for the email*');
   String get password => _t('비밀번호', 'Password');
   String get passwordRequired => _t('비밀번호를 입력해주세요', 'Please enter your password');
   String get passwordTooShort =>

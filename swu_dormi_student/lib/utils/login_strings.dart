@@ -26,7 +26,7 @@ class LoginStrings {
   String get googleLoginNotStudent =>
       _t('학생 계정만 로그인할 수 있습니다.', 'Only student accounts can log in.');
   String get googleStudentIdLabel => _t('학번', 'Student ID');
-  String get googleStudentIdHint => _t('예: 2026123456', 'e.g. 2026123456');
+  String get googleStudentIdHint => _t('예: 2026123456(10자리)', 'e.g. 2026123456(10 digits)');
   String get googleStudentIdInvalid =>
       _t('학번 10자리 숫자를 입력해주세요 (입학연도 4자리 + 학번 6자리)', 'Please enter a 10-digit student ID (4-digit admission year + 6-digit number)');
   String get googleStudentIdCheck => _t('학번 사용가능 확인', 'Check availability');

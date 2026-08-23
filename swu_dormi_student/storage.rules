@@ -23,6 +23,16 @@ service firebase.storage {
       return request.resource.size < 10 * 1024 * 1024;
     }
 
+    // 영상 파일인지 확인하는 함수
+    function isVideo() {
+      return request.resource.contentType.matches('video/.*');
+    }
+
+    // 단톡방 첨부 크기 제한 (20MB)
+    function isUnder20MB() {
+      return request.resource.size < 20 * 1024 * 1024;
+    }
+
     // 프로필 이미지 (파일명: {userId}.jpg) - 앱 내 모든 사용자가 볼 수 있도록 공개 읽기
     match /profile_images/{imageFile} {
       allow read: if true;
@@ -111,6 +121,22 @@ service firebase.storage {
       allow read: if isAuthenticated();
       allow write: if isAuthenticated() &&
                       isUnder10MB();
+    }
+
+    // 관내점검표 항목별 사진 (층장 업로드)
+    match /checklists/images/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() &&
+                      isImage() &&
+                      isUnder10MB();
+    }
+
+    // 층장단톡방 첨부 사진/영상 (업로드 전 앱에서 압축됨)
+    match /floor_chats/{roomId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated() &&
+                      (isImage() || isVideo()) &&
+                      isUnder20MB();
     }
 
     // 기본적으로 모든 접근 차단

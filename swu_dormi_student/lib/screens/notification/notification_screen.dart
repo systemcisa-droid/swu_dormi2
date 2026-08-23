@@ -8,6 +8,7 @@ import '../notices/notices_screen.dart';
 import '../check_in_out/check_in_out_screen.dart';
 import '../meal/meal_screen.dart';
 import '../facilities/facility_report_screen.dart';
+import '../board/post_detail_screen.dart';
 
 class NotificationScreen extends StatefulWidget {
   const NotificationScreen({super.key});
@@ -18,6 +19,7 @@ class NotificationScreen extends StatefulWidget {
 
 class _NotificationScreenState extends State<NotificationScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
 
   Stream<List<NotificationModel>> _getNotificationsStream(String userId) {
     return _firestore
@@ -36,6 +38,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
           content: data['content'] ?? '',
           createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
           isRead: data['isRead'] ?? false,
+          data: (data['data'] as Map<String, dynamic>?),
         );
       }).toList();
     });
@@ -69,6 +72,71 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
+  /// 알림 한 건 삭제. 성공 여부를 돌려줘 실패 시 목록을 되돌릴 수 있게 한다.
+  Future<bool> _deleteNotification(String id) async {
+    try {
+      await _firestore.collection('user_notifications').doc(id).delete();
+      return true;
+    } catch (e) {
+      debugPrint('알림 삭제 실패: $e');
+      return false;
+    }
+  }
+
+  /// 화면에 보이는 알림을 모두 삭제한다.
+  /// 수신을 꺼둔 종류는 목록에 없으므로 삭제 대상에서도 제외한다.
+  Future<void> _deleteAll(String userId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('알림 전체 삭제'),
+        content: const Text('알림을 모두 삭제하시겠습니까? 삭제된 알림은 복구할 수 없습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('삭제', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final snap = await _firestore
+          .collection('user_notifications')
+          .where('userId', isEqualTo: userId)
+          .get();
+
+      // Firestore 배치는 최대 500개 쓰기까지 지원하므로 청크로 나눠 커밋한다.
+      const chunkSize = 400;
+      final list = snap.docs.toList();
+      for (var i = 0; i < list.length; i += chunkSize) {
+        final batch = _firestore.batch();
+        for (final doc in list.skip(i).take(chunkSize)) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('알림을 모두 삭제했습니다')),
+        );
+      }
+    } catch (e) {
+      debugPrint('알림 전체 삭제 실패: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('알림 삭제 중 오류가 발생했습니다')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -85,6 +153,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('알림'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_outlined),
+            tooltip: '전체 삭제',
+            onPressed: () => _deleteAll(userId),
+          ),
+        ],
       ),
       body: StreamBuilder<List<NotificationModel>>(
         stream: _getNotificationsStream(userId),
@@ -171,7 +246,25 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   Widget _buildNotificationItem(NotificationModel notification) {
-    return InkWell(
+    return Dismissible(
+      key: ValueKey(notification.id),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        color: Colors.red,
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: const Icon(Icons.delete, color: Colors.white),
+      ),
+      onDismissed: (_) async {
+        final ok = await _deleteNotification(notification.id);
+        if (!ok && mounted) {
+          // 삭제 실패 시 스트림이 다시 항목을 되살리므로 안내만 한다.
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('알림 삭제에 실패했습니다')),
+          );
+        }
+      },
+      child: InkWell(
       onTap: () {
         if (!notification.isRead) {
           _markAsRead(notification.id);
@@ -274,6 +367,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -285,6 +379,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       case 'meal': return Icons.restaurant;
       case 'facility_report': return Icons.build;
       case 'message': return Icons.mark_email_unread;
+      case 'board_comment': return Icons.forum;
       default: return Icons.notifications;
     }
   }
@@ -297,6 +392,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       case 'meal': return Colors.teal;
       case 'facility_report': return Colors.red;
       case 'message': return Colors.orange;
+      case 'board_comment': return Colors.deepPurple;
       default: return Colors.grey;
     }
   }
@@ -318,21 +414,31 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
   }
 
-  bool _hasNavigationTarget(String type) {
-    return type == 'notice' ||
-        type == 'check_in_out' ||
-        type == 'meal' ||
-        type == 'facility_report';
+  bool _hasNavigationTarget(NotificationModel n) {
+    if (n.type == 'board_comment') {
+      // 댓글 알림은 대상 게시글을 알 수 있을 때만 이동한다.
+      return (n.data?['postId'] as String?)?.isNotEmpty ?? false;
+    }
+    return n.type == 'notice' ||
+        n.type == 'check_in_out' ||
+        n.type == 'meal' ||
+        n.type == 'facility_report';
   }
 
-  void _navigateToTarget(String type) {
+  void _navigateToTarget(NotificationModel n) {
     Widget? targetScreen;
 
-    switch (type) {
+    switch (n.type) {
       case 'notice': targetScreen = const NoticesScreen(); break;
       case 'check_in_out': targetScreen = const CheckInOutScreen(); break;
       case 'meal': targetScreen = const MealScreen(); break;
       case 'facility_report': targetScreen = const FacilityReportScreen(); break;
+      case 'board_comment':
+        final postId = n.data?['postId'] as String?;
+        if (postId != null && postId.isNotEmpty) {
+          targetScreen = PostDetailScreen(postId: postId);
+        }
+        break;
     }
 
     if (targetScreen != null) {
@@ -394,11 +500,11 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ],
         ),
         actions: [
-          if (_hasNavigationTarget(notification.type))
+          if (_hasNavigationTarget(notification))
             TextButton.icon(
               onPressed: () {
                 Navigator.pop(context);
-                _navigateToTarget(notification.type);
+                _navigateToTarget(notification);
               },
               icon: const Icon(Icons.arrow_forward),
               label: const Text('바로가기'),

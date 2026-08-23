@@ -31,6 +31,8 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
   }
 
   Future<void> _changePassword(ChangePasswordStrings s) async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) {
       return;
     }
@@ -163,6 +165,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _currentPasswordController,
+                enabled: !_isLoading,
                 obscureText: !_isCurrentPasswordVisible,
                 decoration: InputDecoration(
                   hintText: s.currentPasswordHint,
@@ -202,6 +205,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _newPasswordController,
+                enabled: !_isLoading,
                 obscureText: !_isNewPasswordVisible,
                 decoration: InputDecoration(
                   hintText: s.newPasswordHint,
@@ -247,6 +251,7 @@ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _confirmPasswordController,
+                enabled: !_isLoading,
                 obscureText: !_isConfirmPasswordVisible,
                 decoration: InputDecoration(
                   hintText: s.confirmNewPasswordHint,

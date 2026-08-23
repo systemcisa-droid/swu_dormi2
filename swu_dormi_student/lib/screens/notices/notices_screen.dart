@@ -7,6 +7,7 @@ import '../../providers/locale_provider.dart';
 import '../../services/database_service.dart';
 import '../../models/notice_model.dart';
 import '../../utils/notices_strings.dart';
+import '../../widgets/linkified_text.dart';
 import 'pdf_viewer_screen.dart';
 
 // ── 카테고리 색상 (어드민과 동일) ───────────────────────────────
@@ -449,8 +450,8 @@ class _NoticesScreenState extends State<NoticesScreen> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                Text(
-                  notice.content,
+                LinkifiedText(
+                  text: notice.content,
                   textAlign: TextAlign.center,
                   style: Theme.of(context)
                       .textTheme

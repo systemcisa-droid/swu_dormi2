@@ -157,6 +157,8 @@ class _AddPostScreenState extends State<AddPostScreen> {
   }
 
   Future<void> _submitPost() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -305,8 +307,11 @@ class _AddPostScreenState extends State<AddPostScreen> {
   @override
   Widget build(BuildContext context) {
     final s = BoardStrings(Provider.of<LocaleProvider>(context).isEnglish);
-    return Scaffold(
-      appBar: AppBar(
+    return PopScope(
+      // 등록 처리 중에는 뒤로가기로 벗어나지 못하게 막는다(업로드 중단 방지).
+      canPop: !_isLoading,
+      child: Scaffold(
+        appBar: AppBar(
         title: Text(_isEditMode ? s.editPostTitle : s.writeTitle),
         actions: [
           TextButton(
@@ -350,7 +355,9 @@ class _AddPostScreenState extends State<AddPostScreen> {
                     color: isSelected ? color : Colors.grey[700],
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                   ),
-                  onSelected: (_) => setState(() => _selectedCategory = cat['value'] as String),
+                  onSelected: _isLoading
+                      ? null
+                      : (_) => setState(() => _selectedCategory = cat['value'] as String),
                 );
               }).toList(),
             ),
@@ -358,9 +365,10 @@ class _AddPostScreenState extends State<AddPostScreen> {
             // 제목 입력
             TextFormField(
               controller: _titleController,
+              enabled: !_isLoading,
               decoration: InputDecoration(
                 labelText: s.postTitleLabel,
-                hintText: s.postTitleHint,
+                hintText: s.postTitleHint(_selectedCategory),
                 border: const OutlineInputBorder(),
               ),
               validator: (value) {
@@ -378,9 +386,10 @@ class _AddPostScreenState extends State<AddPostScreen> {
             // 내용 입력
             TextFormField(
               controller: _contentController,
+              enabled: !_isLoading,
               decoration: InputDecoration(
                 labelText: s.contentLabel,
-                hintText: s.contentHint,
+                hintText: s.contentHint(_selectedCategory),
                 border: const OutlineInputBorder(),
                 alignLabelWithHint: true,
               ),
@@ -443,7 +452,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
                             top: 4,
                             right: 4,
                             child: GestureDetector(
-                              onTap: () => _removeExistingImage(index),
+                              onTap: _isLoading ? null : () => _removeExistingImage(index),
                               child: Container(
                                 decoration: const BoxDecoration(
                                   color: Colors.black54,
@@ -491,7 +500,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
                             top: 4,
                             right: 4,
                             child: GestureDetector(
-                              onTap: () => _removeImage(index),
+                              onTap: _isLoading ? null : () => _removeImage(index),
                               child: Container(
                                 decoration: const BoxDecoration(
                                   color: Colors.black54,
@@ -514,6 +523,7 @@ class _AddPostScreenState extends State<AddPostScreen> {
               ),
             ],
           ],
+        ),
         ),
       ),
     );

@@ -23,6 +23,7 @@ class BoardStrings {
     '물품 나눔(당근)': 'Item Giveaway',
     '정보 알림': 'Info & Alerts',
     '세탁실톡': 'Laundry Room Talk',
+    '맛집': 'Restaurants',
   };
   String categoryLabel(String ko) => isEnglish ? (_categoryEn[ko] ?? ko) : ko;
 
@@ -33,11 +34,50 @@ class BoardStrings {
   String get register => _t('등록', 'Post');
   String get category => _t('카테고리', 'Category');
   String get postTitleLabel => _t('제목', 'Title');
-  String get postTitleHint => _t('무엇을 분실 하셨나요?', 'What did you lose?');
+  static const Map<String, String> _titleHintKo = {
+    'lost&found': '무엇을 분실 하셨나요?',
+    '배달팟': '배달비 아끼고 같이 먹어요^^',
+    '물품 나눔': '나눔해요. 교환도 좋아요',
+    '정보 알림': '행사, 정보, 팁 공유해요',
+    '세탁실톡': '세탁기, 건조기 사용 후에 깜빡 하셨지요?!',
+    '맛집': '학교 근처 맛집 추천해요!',
+  };
+  static const Map<String, String> _titleHintEn = {
+    'lost&found': 'What did you lose?',
+    '배달팟': 'Save on delivery fees, let\'s eat together^^',
+    '물품 나눔': 'Let\'s share or trade items',
+    '정보 알림': 'Share events, info, and tips',
+    '세탁실톡': 'Forgot to grab your laundry from the washer/dryer?!',
+    '맛집': 'Share a good restaurant near campus!',
+  };
+  String postTitleHint(String categoryValue) {
+    final map = isEnglish ? _titleHintEn : _titleHintKo;
+    return map[categoryValue] ?? map['lost&found']!;
+  }
   String get titleRequired => _t('제목을 입력해주세요', 'Please enter a title');
   String get titleTooLong => _t('제목은 100자 이내로 입력해주세요', 'Title must be 100 characters or fewer');
   String get contentLabel => _t('내용', 'Content');
-  String get contentHint => _t('예) 0000분실 했어요. 보신분 손!!!', 'e.g. I lost 0000. If you\'ve seen it, please raise your hand!');
+
+  static const Map<String, String> _contentHintKo = {
+    'lost&found': '예) 0000분실 했어요. 보신분 손!!!',
+    '배달팟': '예) 배달비 아끼고 맛있는 음식 같이 먹어요. 치킨, 피자 고고~',
+    '물품 나눔': '예) 서로 나눔해요~ 남는 샴푸, 사용하지 않는 모자, 갈 수 없는 공연 티켓 ㅠㅠ',
+    '정보 알림': '예) 땡땡인의 밤 모여 취업, 행사 등 정보 공유해요~',
+    '세탁실톡': '예) 8번 세탁기 완료 빨래 찾아가세요~',
+    '맛집': '예) 정문 앞 000집 존맛! 가성비 좋아요~',
+  };
+  static const Map<String, String> _contentHintEn = {
+    'lost&found': 'e.g. I lost 0000. If you\'ve seen it, please raise your hand!',
+    '배달팟': 'e.g. Split delivery fees and enjoy good food together. Chicken, pizza, let\'s go~',
+    '물품 나눔': 'e.g. Let\'s share with each other~ Extra shampoo, unused hats, tickets you can\'t use ㅠㅠ',
+    '정보 알림': 'e.g. Gather info on jobs, events, and more with fellow students~',
+    '세탁실톡': 'e.g. Washer #8 is done, please pick up your laundry~',
+    '맛집': 'e.g. The pasta place by the main gate is amazing and affordable~',
+  };
+  String contentHint(String categoryValue) {
+    final map = isEnglish ? _contentHintEn : _contentHintKo;
+    return map[categoryValue] ?? map['lost&found']!;
+  }
   String get contentRequired => _t('내용을 입력해주세요', 'Please enter content');
   String get contentTooLong => _t('내용은 2000자 이내로 입력해주세요', 'Content must be 2000 characters or fewer');
   String imageAttach(int count) => _t('이미지 첨부 ($count/5)', 'Attach Images ($count/5)');

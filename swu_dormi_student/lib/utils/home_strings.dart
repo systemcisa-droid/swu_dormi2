@@ -15,8 +15,8 @@ class HomeStrings {
   String get menuCleaningInspection => _t('단위실 청소점검', 'Room Cleaning Inspection');
   String get menuCleaningMonthly => _t('월 검사/퇴사 검사', 'Monthly/Move-out Inspection');
   String get menuMoveOutCheck => _t('퇴사 확인', 'Move-out Confirmation');
-  String get menuAttendance => _t('출석체크', 'Attendance Check');
-  String get menuOt => _t('기숙사 OT자료', 'Dorm Orientation Materials');
+  String get menuAttendance => _t('인원점검(화재대피훈련)', 'Attendance Check(Fire Evacuation Drill)');
+  String get menuReservation => _t('예약', 'Reservation');
   String get menuRegulationGroup => _t('사생수칙 & 입사퇴사', 'Rules & Move-in/out');
   String get menuRegulation => _t('사생수칙', 'Resident Rules');
   String get menuCheckInOut => _t('입사퇴사', 'Move-in/out');

@@ -12,6 +12,10 @@ class RewardPenaltyStrings {
   String genericError(Object e) => _t('오류가 발생했습니다: $e', 'An error occurred: $e');
 
   String get currentTotalLabel => _t('현재 상벌점 합계', 'Current Point Total');
+  String get realtimeNotice => _t(
+        '해당 화면에 표시되는 상벌점은 실시간 반영되는 내용이 아니기 때문에 실제 상벌점과 차이가 있을 수 있습니다.\n반드시 종합정보시스템에서 본인의 상벌점을 직접 확인하시기 바랍니다.',
+        'The points shown here are not updated in real time and may differ from your actual points.\nPlease check your points directly in the Integrated Information System.',
+      );
   String points(int p) => _t('$p점', '$p pts');
   String historyCount(int n) => _t('이력 ($n건)', 'History ($n)');
   String get noHistory => _t('상벌점 이력이 없습니다', 'No point history');

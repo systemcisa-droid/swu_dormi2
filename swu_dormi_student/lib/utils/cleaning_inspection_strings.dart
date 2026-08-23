@@ -30,6 +30,7 @@ class CleaningInspectionStrings {
   String get statusApplied => _t('신청완료', 'Applied');
   String get statusScheduled => _t('예정', 'Scheduled');
   String get statusExpired => _t('기한만료', 'Expired');
+  String get statusAdminOnly => _t('신청불가', 'Not available');
   String get statusFull => _t('마감', 'Full');
   String get statusDuplicateBlocked => _t('중복신청불가', 'Already Applied');
   String get statusApply => _t('신청', 'Apply');
@@ -97,7 +98,7 @@ class CleaningInspectionStrings {
         '청소 신청 당일에는 날짜·시간 변경 절대 불가\n변경 시 청소검사 미이행으로 벌점 4점 부여',
         'Date and time changes are strictly prohibited on the day of the cleaning appointment\nChanging it will result in a 4-point penalty for failing to complete the cleaning inspection',
       );
-  String get contactInfo => _t('문의: 해당 구역 층장 오픈카톡방', 'Contact: The floor captain\'s open KakaoTalk chat room for your area');
+  String get contactInfo => _t('문의: 해당 구역 층장단톡방', 'Contact: The floor captain\'s open chat room for your area');
 
   // ── 신청 다이얼로그 ──
   String get residenceInfoRequired =>
@@ -109,6 +110,9 @@ class CleaningInspectionStrings {
   String roomLabelWithNumber(String room) => _t('호실: $room호', 'Room: $room');
   String get commonAreaSelectTitle => _t('공동구역 선택 (선택사항)', 'Select Common Areas (Optional)');
   String get commonAreaSelectHint => _t('점검이 필요한 공동구역을 선택해 주세요', 'Please select the common areas that need inspection');
+  // 대리점검자는 관리 프로그램에서 지정하며, 학생 앱은 표시만 한다.
+  String proxyLabel(String name) => _t('대리점검: $name', 'Proxy: $name');
+
   String get memoHint => _t('전달 사항 (선택)', 'Message (optional)');
   String get applyAction => _t('신청하기', 'Apply');
 
@@ -124,6 +128,8 @@ class CleaningInspectionStrings {
 
   String get notApplicationPeriod => _t('아직 신청 기간이 아닙니다', 'The application period has not started yet');
   String get applicationDeadlinePassed => _t('신청 기한이 만료되었습니다', 'The application deadline has passed');
+  String get adminOnlySchedule => _t('직접 신청할 수 없는 일정입니다. 층장에게 문의해주세요',
+      'This schedule cannot be applied for directly. Please contact your floor captain');
   String get alreadyPending => _t('이미 대기 중인 신청이 있습니다', 'You already have a pending request');
   String get monthlyLimitReached =>
       _t('월검사는 한 달에 한 번만 신청할 수 있습니다', 'You can only apply for the monthly inspection once per month');

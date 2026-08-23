@@ -22,6 +22,8 @@ class _AccountDeletionScreenState extends State<AccountDeletionScreen> {
   }
 
   Future<void> _deleteAccount() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final isGoogle = authProvider.isGoogleSignedIn;
 

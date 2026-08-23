@@ -172,6 +172,8 @@ class _MoveOutSignatureTabState extends State<_MoveOutSignatureTab> {
   }
 
   Future<void> _submitSignature() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     final s = MoveOutInspectionStrings(
         Provider.of<LocaleProvider>(context, listen: false).isEnglish);
     if (_nameController.text.trim().isEmpty) {

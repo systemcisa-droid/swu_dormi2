@@ -8,6 +8,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../services/database_service.dart';
 import '../../utils/board_strings.dart';
+import '../../widgets/linkified_text.dart';
 import 'add_post_screen.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -93,6 +94,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         'commentCount': FieldValue.increment(1),
       });
 
+      // 게시글 작성자에게 댓글 알림 생성 (본인 글에 본인이 단 댓글은 제외)
+      await _notifyPostAuthor(
+        commenterName: userNickname ?? userName,
+        content: content,
+        commenterId: userId,
+      );
+
       if (mounted) {
         final s = BoardStrings(Provider.of<LocaleProvider>(context, listen: false).isEnglish);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -111,6 +119,44 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       }
     } finally {
       if (mounted) setState(() => _isLoadingComment = false);
+    }
+  }
+
+  /// 내 게시글에 댓글이 달리면 작성자에게 알림을 남긴다.
+  /// 알림 실패가 댓글 등록을 되돌리지 않도록 예외는 삼킨다.
+  Future<void> _notifyPostAuthor({
+    required String commenterName,
+    required String content,
+    required String commenterId,
+  }) async {
+    try {
+      final postDoc =
+          await _firestore.collection('board_posts').doc(widget.postId).get();
+      final postData = postDoc.data();
+      if (postData == null) return;
+
+      final authorId = (postData['authorId'] as String?) ?? '';
+      // 본인 글에 본인이 단 댓글은 알리지 않는다.
+      if (authorId.isEmpty || authorId == commenterId) return;
+
+      final postTitle = (postData['title'] as String?) ?? '';
+      // 알림 목록에서 길어지지 않도록 본문은 앞부분만 담는다.
+      final preview = content.length > 40 ? '${content.substring(0, 40)}...' : content;
+
+      await _firestore.collection('user_notifications').add({
+        'userId': authorId,
+        'type': 'board_comment',
+        'title': '내 게시글에 새 댓글',
+        'content': '$commenterName님: $preview',
+        'data': {
+          'postId': widget.postId,
+          'postTitle': postTitle,
+        },
+        'createdAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+      });
+    } catch (e) {
+      debugPrint('댓글 알림 생성 실패: $e');
     }
   }
 
@@ -506,9 +552,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         const SizedBox(height: 16),
         Text(post.title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         const SizedBox(height: 16),
-        Text(post.content, style: const TextStyle(fontSize: 15, height: 1.5)),
         if (post.imageUrls.isNotEmpty) ...[
-          const SizedBox(height: 16),
           ...post.imageUrls.map((url) => Padding(
                 padding: const EdgeInsets.only(bottom: 8.0),
                 child: ClipRRect(
@@ -525,7 +569,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   ),
                 ),
               )),
+          const SizedBox(height: 16),
         ],
+        LinkifiedText(text: post.content, style: const TextStyle(fontSize: 15, height: 1.5)),
         const SizedBox(height: 16),
         Row(
           children: [
@@ -631,7 +677,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: Text(comment.content, style: const TextStyle(fontSize: 14, height: 1.4)),
+                    child: LinkifiedText(text: comment.content, style: const TextStyle(fontSize: 14, height: 1.4)),
                   ),
                 ],
               ),
@@ -770,14 +816,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             Expanded(
               child: TextField(
                 controller: _commentController,
+                enabled: !_isLoadingComment,
                 decoration: InputDecoration(
                   hintText: s.commentHint,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(24)),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
-                maxLines: null,
-                textInputAction: TextInputAction.send,
-                onSubmitted: (_) => _addComment(user.uid, user.name, user.nickname, user.profileImageUrl),
+                minLines: 1,
+                maxLines: 6,
+                textInputAction: TextInputAction.newline,
               ),
             ),
             const SizedBox(width: 8),

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../providers/locale_provider.dart';
 import '../../utils/notification_settings_strings.dart';
+import '../../providers/auth_provider.dart';
+import '../../utils/notification_prefs.dart';
 
 class NotificationSettingsScreen extends StatefulWidget {
   const NotificationSettingsScreen({super.key});
@@ -17,10 +18,12 @@ class _NotificationSettingsScreenState
   bool _allNotifications = true;
   bool _noticeNotifications = true;
   bool _facilityNotifications = true;
-  bool _mealNotifications = true;
+  // 식단표 알림은 기본 꺼짐(사용자가 직접 켜야 받는다)
+  bool _mealNotifications = false;
   bool _checkInOutNotifications = true;
   bool _messageNotifications = true;
   bool _adminMessageNotifications = true;
+  bool _boardCommentNotifications = true;
 
   @override
   void initState() {
@@ -29,30 +32,41 @@ class _NotificationSettingsScreenState
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
+    final userId =
+        Provider.of<AuthProvider>(context, listen: false).currentUser?.uid;
+    if (userId == null) return;
+    final settings = await NotificationPrefs.load(userId);
+    if (!mounted) return;
     setState(() {
-      _allNotifications = prefs.getBool('all_notifications') ?? true;
-      _noticeNotifications = prefs.getBool('notice_notifications') ?? true;
-      _facilityNotifications = prefs.getBool('facility_notifications') ?? true;
-      _mealNotifications = prefs.getBool('meal_notifications') ?? true;
+      _allNotifications = settings['all_notifications'] ?? true;
+      _noticeNotifications = settings['notice_notifications'] ?? true;
+      _facilityNotifications = settings['facility_notifications'] ?? true;
+      _mealNotifications = settings['meal_notifications'] ?? false;
       _checkInOutNotifications =
-          prefs.getBool('check_in_out_notifications') ?? true;
-      _messageNotifications = prefs.getBool('message_notifications') ?? true;
+          settings['check_in_out_notifications'] ?? true;
+      _messageNotifications = settings['message_notifications'] ?? true;
       _adminMessageNotifications =
-          prefs.getBool('admin_message_notifications') ?? true;
+          settings['admin_message_notifications'] ?? true;
+      _boardCommentNotifications =
+          settings['board_comment_notifications'] ?? true;
     });
   }
 
   Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('all_notifications', _allNotifications);
-    await prefs.setBool('notice_notifications', _noticeNotifications);
-    await prefs.setBool('facility_notifications', _facilityNotifications);
-    await prefs.setBool('meal_notifications', _mealNotifications);
-    await prefs.setBool('check_in_out_notifications', _checkInOutNotifications);
-    await prefs.setBool('message_notifications', _messageNotifications);
-    await prefs.setBool(
-        'admin_message_notifications', _adminMessageNotifications);
+    final userId =
+        Provider.of<AuthProvider>(context, listen: false).currentUser?.uid;
+    if (userId == null) return;
+    // Firestore에 저장해 알림을 만드는 쪽(관리 프로그램)이 참고할 수 있게 한다.
+    await NotificationPrefs.save(userId, {
+      'all_notifications': _allNotifications,
+      'notice_notifications': _noticeNotifications,
+      'facility_notifications': _facilityNotifications,
+      'meal_notifications': _mealNotifications,
+      'check_in_out_notifications': _checkInOutNotifications,
+      'message_notifications': _messageNotifications,
+      'admin_message_notifications': _adminMessageNotifications,
+      'board_comment_notifications': _boardCommentNotifications,
+    });
 
     if (mounted) {
       final s = NotificationSettingsStrings(
@@ -102,6 +116,7 @@ class _NotificationSettingsScreenState
                     _checkInOutNotifications = false;
                     _messageNotifications = false;
                     _adminMessageNotifications = false;
+                    _boardCommentNotifications = false;
                   } else {
                     _noticeNotifications = true;
                     _facilityNotifications = true;
@@ -109,6 +124,7 @@ class _NotificationSettingsScreenState
                     _checkInOutNotifications = true;
                     _messageNotifications = true;
                     _adminMessageNotifications = true;
+                    _boardCommentNotifications = true;
                   }
                 });
                 _saveSettings();
@@ -219,6 +235,22 @@ class _NotificationSettingsScreenState
             onChanged: (value) {
               setState(() {
                 _adminMessageNotifications = value;
+              });
+              _saveSettings();
+            },
+          ),
+          const Divider(height: 1, indent: 72),
+
+          _buildNotificationTile(
+            icon: Icons.forum,
+            iconColor: Colors.deepPurple,
+            title: s.boardComment,
+            subtitle: s.boardCommentSubtitle,
+            value: _boardCommentNotifications,
+            enabled: _allNotifications,
+            onChanged: (value) {
+              setState(() {
+                _boardCommentNotifications = value;
               });
               _saveSettings();
             },

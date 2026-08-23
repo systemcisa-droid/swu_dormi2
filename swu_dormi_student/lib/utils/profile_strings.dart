@@ -9,6 +9,14 @@ class ProfileStrings {
   String get imageUploadError => _t('프로필 사진 업로드 중 오류가 발생했습니다', 'An error occurred while uploading the profile photo');
   String get takePhoto => _t('카메라로 촬영', 'Take a Photo');
   String get chooseFromGallery => _t('갤러리에서 선택', 'Choose from Gallery');
+  String get editNickname => _t('별명 수정', 'Edit Nickname');
+  String get nicknameEditLabel => _t('별명...', 'Nickname');
+  String get nicknameHint => _t('별명을 입력하세요 (선택)', 'Enter a nickname (optional)');
+  String get nicknameUpdated => _t('별명이 저장되었습니다', 'Nickname saved');
+  String get nicknameUpdateError => _t('별명 저장 중 오류가 발생했습니다', 'An error occurred while saving the nickname');
+  String get save => _t('저장', 'Save');
+  String get cancel => _t('취소', 'Cancel');
+  String get nicknameTooLong => _t('별명은 10자 이하로 입력해주세요', 'Nickname must be 10 characters or fewer');
   String get rewardPenalty => _t('상벌점', 'Reward/Penalty');
   String get pointNotice =>
       _t('상벌점 발생 시 알림 메시지는 발송되지 않습니다.', 'Notification messages are not sent when reward/penalty points occur.');

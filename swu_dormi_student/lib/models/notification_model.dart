@@ -7,6 +7,8 @@ class NotificationModel {
   final String content;
   final DateTime createdAt;
   final bool isRead;
+  // 알림 종류별 부가 정보(예: 게시글 댓글 알림의 postId)
+  final Map<String, dynamic>? data;
 
   NotificationModel({
     required this.id,
@@ -15,6 +17,7 @@ class NotificationModel {
     required this.content,
     required this.createdAt,
     this.isRead = false,
+    this.data,
   });
 
   Map<String, dynamic> toMap() {

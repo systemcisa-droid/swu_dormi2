@@ -90,6 +90,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _showEditNicknameDialog(dynamic user) async {
+    final s = ProfileStrings(Provider.of<LocaleProvider>(context, listen: false).isEnglish);
+    final controller = TextEditingController(text: user.nickname ?? '');
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(s.editNickname),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 10,
+          decoration: InputDecoration(hintText: s.nicknameHint),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(s.cancel),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: Text(s.save),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    if (result.trim().length > 10) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.nicknameTooLong)),
+        );
+      }
+      return;
+    }
+
+    try {
+      await DatabaseService().updateNickname(user.uid, result);
+      if (!mounted) return;
+      await Provider.of<AuthProvider>(context, listen: false).refreshUserData();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(s.nicknameUpdated)),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${s.nicknameUpdateError}: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authProvider = Provider.of<AuthProvider>(context);
@@ -200,6 +254,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                               ),
                             ],
+                            const SizedBox(width: 4),
+                            GestureDetector(
+                              onTap: () => _showEditNicknameDialog(user),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.edit,
+                                    size: 18,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    '${s.nicknameEditLabel}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey.shade500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 4),

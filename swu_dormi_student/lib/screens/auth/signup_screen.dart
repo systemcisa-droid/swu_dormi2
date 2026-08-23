@@ -32,6 +32,8 @@ class _SignupScreenState extends State<SignupScreen> {
   }
 
   Future<void> _handleSignup() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
@@ -81,6 +83,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 const SizedBox(height: 24),
                 TextFormField(
                   controller: _nameController,
+                  enabled: !_isLoading,
                   decoration: InputDecoration(
                     labelText: s.name,
                     prefixIcon: const Icon(Icons.person),
@@ -96,6 +99,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _emailIdController,
+                  enabled: !_isLoading,
                   keyboardType: TextInputType.number,
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly,
@@ -133,6 +137,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _passwordController,
+                  enabled: !_isLoading,
                   obscureText: _obscurePassword,
                   decoration: InputDecoration(
                     labelText: s.password,
@@ -162,6 +167,7 @@ class _SignupScreenState extends State<SignupScreen> {
                 const SizedBox(height: 16),
                 TextFormField(
                   controller: _confirmPasswordController,
+                  enabled: !_isLoading,
                   obscureText: _obscureConfirmPassword,
                   decoration: InputDecoration(
                     labelText: s.confirmPassword,

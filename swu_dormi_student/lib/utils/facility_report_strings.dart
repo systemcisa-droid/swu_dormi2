@@ -55,7 +55,8 @@ class FacilityReportStrings {
   String get room => _t('호실', 'Room');
   String get seatNumber => _t('자리번호', 'Seat Number');
 
-  String get photoVideoAttachOptional => _t('사진 및 영상 첨부 (선택사항)', 'Attach Photos/Videos (Optional)');
+  String get photoVideoAttachOptional => _t('사진 및 영상 첨부 (필수)', 'Attach Photos/Videos (Required)');
+  String get photoVideoRequired => _t('사진 또는 영상을 1개 이상 첨부해주세요', 'Please attach at least one photo or video');
   String get addPhotoVideo => _t('사진 및 영상 추가', 'Add Photos/Videos');
   String get requestType => _t('신청 유형', 'Request Type');
   String get detailDescription => _t('상세 설명', 'Detailed Description');

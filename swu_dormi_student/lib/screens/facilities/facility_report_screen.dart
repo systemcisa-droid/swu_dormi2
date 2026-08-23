@@ -230,6 +230,8 @@ class _FacilityReportFormState extends State<_FacilityReportForm> {
   }
 
   Future<void> _submitReport() async {
+    // 처리 중 재진입(중복 제출) 방지
+    if (_isLoading) return;
     final s = FacilityReportStrings(Provider.of<LocaleProvider>(context, listen: false).isEnglish);
     if (_formKey.currentState == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -239,6 +241,17 @@ class _FacilityReportFormState extends State<_FacilityReportForm> {
     }
 
     if (!_formKey.currentState!.validate()) return;
+
+    // 사진/영상 첨부는 필수 — 1개 이상 선택해야 접수할 수 있다.
+    if (_selectedMedia.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(s.photoVideoRequired),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final user = authProvider.currentUser;
@@ -428,12 +441,20 @@ class _FacilityReportFormState extends State<_FacilityReportForm> {
             Row(
               children: [
                 Flexible(
-                  child: Text(
-                    s.photoVideoAttachOptional,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+                  child: Text.rich(
+                    TextSpan(
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                      children: [
+                        TextSpan(text: s.photoVideoAttachOptional),
+                        const TextSpan(
+                          text: ' *',
+                          style: TextStyle(color: Colors.red),
+                        ),
+                      ],
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1143,8 +1164,15 @@ class _FacilityReportListState extends State<_FacilityReportList> {
                 // ── 첨부 이미지 ──────────────────────────────
                 Row(
                   children: [
-                    Text(s.attachedImages(remainingUrls.length + newFiles.length),
-                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    Text.rich(
+                      TextSpan(
+                        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        children: [
+                          TextSpan(text: s.attachedImages(remainingUrls.length + newFiles.length)),
+                          const TextSpan(text: ' *', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
                     const Spacer(),
                     TextButton.icon(
                       onPressed: () => pickImage(setS),
@@ -1178,6 +1206,16 @@ class _FacilityReportListState extends State<_FacilityReportList> {
                   onPressed: () async {
                     final desc = descCtrl.text.trim();
                     if (desc.isEmpty) return;
+                    // 사진/영상 첨부는 필수 — 수정 시에도 최소 1개는 남겨야 한다.
+                    if (remainingUrls.isEmpty && newFiles.isEmpty) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(
+                          content: Text(s.photoVideoRequired),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
                     Navigator.pop(ctx);
                     await _doUpdate(
                       report.id,

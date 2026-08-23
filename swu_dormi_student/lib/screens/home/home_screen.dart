@@ -10,6 +10,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../services/notification_service.dart';
 import '../../utils/home_strings.dart';
+import '../../utils/notification_prefs.dart';
 import '../notices/notices_screen.dart';
 import '../check_in_out/check_in_out_screen.dart';
 import '../facilities/facility_report_screen.dart';
@@ -17,13 +18,13 @@ import '../meal/meal_screen.dart';
 import '../profile/profile_screen.dart';
 import '../notification/notification_screen.dart';
 import '../profile/regulation_screen.dart';
-import '../profile/reward_penalty_screen.dart';
 import '../board/board_screen.dart';
 import '../cleaning/cleaning_inspection_screen.dart';
 import '../cleaning/move_out_inspection_screen.dart';
 import '../message/floor_chat_screen.dart';
-import '../ot/ot_screen.dart';
 import '../attendance/attendance_screen.dart';
+import '../attendance/my_qr_code_page.dart';
+import '../reservation/reservation_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -36,7 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription<QuerySnapshot>? _notificationSubscription;
   StreamSubscription<QuerySnapshot>? _chatSubscription;
   bool _isFirstSnapshot = true;
-  bool _isRedColor = true;
+  bool _isRedLogo = true;
   String? _bannerImageUrl;
   int _unreadChatCount = 0;
 
@@ -217,6 +218,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final user = authProvider.currentUser;
     if (user != null) {
       await NotificationService().initialize(user.uid);
+      // 알림 설정이 아직 없으면 기본값을 저장해 둔다.
+      await NotificationPrefs.ensureInitialized(user.uid);
     }
   }
 
@@ -241,18 +244,23 @@ class _HomeScreenState extends State<HomeScreen> {
         if (change.type == DocumentChangeType.added) {
           final data = change.doc.data();
           if (data != null) {
-            final title = data['title'] ?? '새로운 알림';
-            final content = data['content'] ?? '';
-            _triggerVibration();
-            Fluttertoast.showToast(
-              msg: '📢 $title\n$content',
-              toastLength: Toast.LENGTH_LONG,
-              gravity: ToastGravity.TOP,
-              timeInSecForIosWeb: 4,
-              backgroundColor: Colors.black87,
-              textColor: Colors.white,
-              fontSize: 15.0,
-            );
+            // 알림 종류별 수신 설정이 꺼져 있으면 진동/토스트를 띄우지 않는다.
+            // (알림 문서 자체는 남아 알림 목록에서 확인할 수 있다)
+            NotificationPrefs.isEnabled(data['type'] as String?).then((enabled) {
+              if (!enabled || !mounted) return;
+              final title = data['title'] ?? '새로운 알림';
+              final content = data['content'] ?? '';
+              _triggerVibration();
+              Fluttertoast.showToast(
+                msg: '📢 $title\n$content',
+                toastLength: Toast.LENGTH_LONG,
+                gravity: ToastGravity.TOP,
+                timeInSecForIosWeb: 4,
+                backgroundColor: Colors.black87,
+                textColor: Colors.white,
+                fontSize: 15.0,
+              );
+            });
           }
         }
       }
@@ -420,28 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
-          Padding(
-            padding: const EdgeInsets.only(right: 8.0),
-            child: IconButton(
-              icon: user?.profileImageUrl != null
-                  ? CircleAvatar(
-                      radius: 18,
-                      backgroundImage: NetworkImage(user!.profileImageUrl!),
-                    )
-                  : const CircleAvatar(
-                      radius: 18,
-                      child: Icon(Icons.person, size: 20),
-                    ),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => const ProfileScreen(),
-                  ),
-                );
-              },
-            ),
-          ),
+          const SizedBox(width: 8),
         ],
       ),
       drawer: _buildDrawer(context, user, s),
@@ -503,48 +490,114 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Theme.of(context).colorScheme.primary,
-                    backgroundImage: user?.profileImageUrl != null
-                        ? NetworkImage(user!.profileImageUrl!)
-                        : null,
-                    child: user?.profileImageUrl == null
-                        ? Text(
-                            user?.name?.substring(0, 1) ?? 'S',
-                            style: const TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
+                  Row(
+                    children: [
+                      // 아바타를 누르면 프로필 화면으로 이동한다.
+                      InkWell(
+                        borderRadius: BorderRadius.circular(30),
+                        onTap: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const ProfileScreen(),
                             ),
-                          )
-                        : null,
+                          );
+                        },
+                        child: CircleAvatar(
+                          radius: 30,
+                          backgroundColor: Theme.of(context).colorScheme.primary,
+                          backgroundImage: user?.profileImageUrl != null
+                              ? NetworkImage(user!.profileImageUrl!)
+                              : null,
+                          child: user?.profileImageUrl == null
+                              ? Text(
+                                  user?.name?.substring(0, 1) ?? 'S',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : null,
+                        ),
+                      ),
+                      const SizedBox(width: 32),
+                      // 내 QR 코드 생성
+                      if (user != null)
+                        Material(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () async {
+                              Navigator.pop(context);
+                              // 층장이 스캔해 출석이 기록되면(true) 인원점검 화면으로 이동한다.
+                              final checkedIn = await Navigator.push<bool>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => MyQrCodePage(
+                                    uid: user.uid,
+                                    studentId: user.studentId,
+                                    profileImageUrl: user.profileImageUrl,
+                                    userName: user.name,
+                                  ),
+                                ),
+                              );
+                              if (checkedIn == true && context.mounted) {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (context) => const AttendanceScreen(),
+                                  ),
+                                );
+                              }
+                            },
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 8),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.qr_code_2,
+                                    size: 50,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),                          
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
-                      Text(
-                        user?.name ?? s.student,
-                        style: const TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
+                      Flexible(
+                        child: Text(
+                          user?.name ?? s.student,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                       if (user?.nickname != null && user!.nickname!.isNotEmpty) ...[
                         const SizedBox(width: 6),
-                        Text(
-                          '(${user.nickname})',
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: Colors.grey.shade700,
+                        Flexible(
+                          child: Text(
+                            '(${user.nickname})',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              color: Colors.grey.shade700,
+                            ),
                           ),
                         ),
                       ],
                     ],
-                  ),
-                  Text(
-                    user?.studentId ?? '',
-                    style: const TextStyle(fontSize: 14),
                   ),
                 ],
               ),
@@ -611,7 +664,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ));
                   },
                 ),
-                _buildChatDrawerTile(context, user),
               ],
             ),
             const Divider(height: 1),
@@ -625,13 +677,15 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.picture_as_pdf, color: Colors.orange),
-              title: Text(s.menuOt),
+              leading: const Icon(Icons.event_seat, color: Colors.indigo),
+              title: Text(s.menuReservation),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const OtScreen()));
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const ReservationScreen()));
               },
             ),
+            const Divider(height: 1),
+            _buildChatDrawerTile(context, user),
             const Divider(height: 1),
             ExpansionTile(
               leading: const Icon(Icons.description, color: Colors.indigo),
@@ -656,15 +710,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 ),
               ],
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.stars, color: Colors.amber),
-              title: Text(s.menuRewardPenalty),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const RewardPenaltyScreen()));
-              },
             ),
           ],
         ),
@@ -722,8 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
             ],
           ),
-          title: const Text('층장단톡방'),
-          contentPadding: const EdgeInsets.only(left: 32, right: 16),
+          title: const Text('층장단톡(청검|인검 문의)'),
           onTap: () {
             Navigator.pop(context);
             Navigator.push(context, MaterialPageRoute(
@@ -739,35 +783,19 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () {
         setState(() {
-          _isRedColor = !_isRedColor;
+          _isRedLogo = !_isRedLogo;
         });
       },
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            height: 30,
-            width: 30,
-            decoration: BoxDecoration(
-              color: _isRedColor ? const Color(0xFFB13B3B) : Colors.blue,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            transform: Matrix4.rotationZ(0.785398),
-            child: Transform.rotate(
-              angle: -0.785398,
-              child: const Center(
-                child: Text(
-                  'SWU',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
-                  ),
-                ),
-              ),
-            ),
+          Image.asset(
+            _isRedLogo ? 'assets/images/swu_R.png' : 'assets/images/swu_B.png',
+            height: 36,
+            width: 36,
+            fit: BoxFit.contain,
           ),
+          const SizedBox(width: 6),
           const Text(
             '기숙사(2학기)',
             style: TextStyle(
