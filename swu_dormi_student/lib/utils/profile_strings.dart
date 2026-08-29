@@ -18,8 +18,6 @@ class ProfileStrings {
   String get cancel => _t('취소', 'Cancel');
   String get nicknameTooLong => _t('별명은 10자 이하로 입력해주세요', 'Nickname must be 10 characters or fewer');
   String get rewardPenalty => _t('상벌점', 'Reward/Penalty');
-  String get pointNotice =>
-      _t('상벌점 발생 시 알림 메시지는 발송되지 않습니다.', 'Notification messages are not sent when reward/penalty points occur.');
   String get personalInfo => _t('개인 정보', 'Personal Information');
   String get email => _t('이메일', 'Email');
   String get phoneNumber => _t('전화번호', 'Phone Number');

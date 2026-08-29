@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../utils/cleaning_inspection_strings.dart';
+import 'move_out_inspection_screen.dart';
 
 class CleaningInspectionScreen extends StatefulWidget {
   final String inspectionType; // 'monthly' or 'move_out'
@@ -29,29 +30,130 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
   bool _isSubmitting = false;
   String? _error;
   int _viewMode = 0; // 0: 스케줄, 1: 내역, 2: 안내
+  /// 퇴사확인 서명 제출 여부 (퇴사청소 신청의 선행 조건)
+  bool _hasMoveOutSignature = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    // 월검사 화면에도 퇴사검사 스케줄이 함께 표시되므로 항상 조회한다.
+    _loadMoveOutSignature();
+  }
+
+  /// 퇴사확인 서명 제출 여부를 확인한다.
+  Future<void> _loadMoveOutSignature() async {
+    final user =
+        Provider.of<AuthProvider>(context, listen: false).currentUser;
+    if (user == null) return;
+    try {
+      final doc = await _firestore
+          .collection('move_out_agreements')
+          .doc(user.uid)
+          .get();
+      if (mounted) {
+        setState(() => _hasMoveOutSignature = doc.exists);
+      }
+    } catch (e) {
+      debugPrint('퇴사확인 서명 조회 오류: $e');
+    }
+  }
+
+  /// 퇴사청소 신청 전 서명 여부를 확인하고, 미제출이면 안내 후 false 를 반환한다.
+  ///
+  /// 검사 유형은 화면이 아니라 신청하려는 스케줄에서 판단한다.
+  /// (퇴사검사 스케줄이 월검사 화면 목록에도 함께 나오기 때문)
+  Future<bool> _requireMoveOutSignature(String inspectionType) async {
+    if (inspectionType != 'move_out') return true;
+    if (_hasMoveOutSignature) return true;
+
+    // 다른 기기에서 서명했을 수 있으므로 한 번 더 확인한다.
+    await _loadMoveOutSignature();
+    if (_hasMoveOutSignature) return true;
+
+    if (!mounted) return false;
+    final strs = CleaningInspectionStrings(
+        Provider.of<LocaleProvider>(context, listen: false).isEnglish);
+    final navigator = Navigator.of(context);
+    final goToAgreement = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(strs.moveOutSignatureRequiredTitle),
+        content: Text(strs.moveOutSignatureRequiredContent),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(strs.moveOutSignatureRequiredClose),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(strs.moveOutSignatureRequiredGo),
+          ),
+        ],
+      ),
+    );
+
+    if (goToAgreement == true) {
+      await navigator.push(MaterialPageRoute(
+        builder: (context) => const MoveOutInspectionScreen(),
+      ));
+      // 서명하고 돌아왔을 수 있으므로 다시 확인한다.
+      await _loadMoveOutSignature();
+    }
+    return false;
   }
 
   /// 사용자의 dormBuilding + 동/층 정보를 기반으로 스케줄 floor 필드 매칭 문자열 생성
   /// 예: dormBuilding="샬롬하우스", building="A동", roomNumber="201" → "샬롬하우스 A동 2층"
   /// 구형식 호환: dormBuilding 없으면 "A동 2층"
+  /// 기숙사 건물과 호실 번호로 동(A동/B동)을 계산한다.
+  ///
+  /// 국제생활관은 호실 번호만으로 동이 정해지므로, 저장된 building 값이
+  /// '미배정'이어도 여기서 올바른 동을 구할 수 있다.
+  /// '(겨울방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
+  String? _wingFromRoom(String dormBuilding, String roomNumber) {
+    final room = int.tryParse(roomNumber) ?? 0;
+    if (room == 0) return null;
+
+    if (dormBuilding.startsWith('국제생활관')) {
+      if ((room >= 101 && room <= 132) || (room >= 201 && room <= 229)) {
+        return 'A동';
+      }
+      if ((room >= 233 && room <= 260) || (room >= 301 && room <= 329)) {
+        return 'B동';
+      }
+      return null;
+    }
+    if (dormBuilding.startsWith('샬롬하우스')) {
+      final roomInFloor = room % 100;
+      if (roomInFloor >= 1 && roomInFloor <= 20) return 'A동';
+      if (roomInFloor >= 21 && roomInFloor <= 35) return 'B동';
+      return null;
+    }
+    return null;
+  }
+
   String? _getUserFloorLabel(dynamic user) {
     if (user == null) return null;
     final dormBuilding = user.dormBuilding as String?;
-    final building = user.building as String?;
     final roomNumber = user.roomNumber as String?;
     final seatNumber = user.seatNumber as String?;
 
     if (dormBuilding == null || dormBuilding.isEmpty ||
-        building == null || building.isEmpty || building == '미배정' ||
         roomNumber == null || roomNumber.isEmpty || roomNumber == '000' ||
         seatNumber == null || seatNumber.isEmpty) {
       return null;
     }
+
+    // 저장된 building 이 '미배정' 등으로 비어 있어도 호실로 동을 계산한다.
+    final savedBuilding = user.building as String?;
+    final building = _wingFromRoom(dormBuilding, roomNumber) ??
+        ((savedBuilding == null ||
+                savedBuilding.isEmpty ||
+                savedBuilding == '미배정')
+            ? null
+            : savedBuilding);
+    if (building == null && dormBuilding != '바롬인성교육관') return null;
 
     final String floorNum;
     if (roomNumber.length == 3) {
@@ -1012,6 +1114,11 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
         Provider.of<LocaleProvider>(context, listen: false).isEnglish);
     // 처리 중 재진입(중복 신청) 방지
     if (_isSubmitting) return;
+    // 퇴사청소 재검사도 서명이 있어야 한다.
+    final recheckType =
+        (schedule['inspectionType'] as String?) ?? widget.inspectionType;
+    if (!await _requireMoveOutSignature(recheckType)) return;
+    if (!mounted) return;
     setState(() => _isSubmitting = true);
     try {
       final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
@@ -1362,6 +1469,12 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
         Provider.of<LocaleProvider>(context, listen: false).isEnglish);
     // 처리 중 재진입(중복 신청) 방지
     if (_isSubmitting) return;
+    // 퇴사청소는 퇴사확인 서명을 제출해야 신청할 수 있다.
+    // 유형은 화면이 아니라 스케줄 문서를 기준으로 판단한다.
+    final applyType =
+        (scheduleData['inspectionType'] as String?) ?? widget.inspectionType;
+    if (!await _requireMoveOutSignature(applyType)) return;
+    if (!mounted) return;
     setState(() => _isSubmitting = true);
     try {
       if (_getUserFloorLabel(user) == null) {

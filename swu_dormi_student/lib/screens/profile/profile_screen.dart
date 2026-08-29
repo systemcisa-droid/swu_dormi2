@@ -6,7 +6,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../services/database_service.dart';
 import '../../services/storage_service.dart';
-import '../../models/point_history_model.dart';
 import '../../utils/app_strings.dart';
 import '../../utils/profile_strings.dart';
 import 'reward_penalty_screen.dart';
@@ -284,73 +283,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           style: Theme.of(context).textTheme.bodyLarge,
                         ),
                         const SizedBox(height: 12),
-                        StreamBuilder<List<PointHistoryModel>>(
-                          stream: DatabaseService().getPointHistory(user.uid),
-                          builder: (context, snapshot) {
-                            int totalPoints = user.points;
-                            if (snapshot.hasData) {
-                              totalPoints = snapshot.data!.fold<int>(
-                                0,
-                                (sum, e) => sum + (e.isReward ? e.points : -e.points),
-                              );
-                            }
-                            return Column(
+                        // 점수는 표시하지 않으므로 이력 조회 없이 메뉴만 보여준다.
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const RewardPenaltyScreen(initialTab: 1),
+                              ),
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.85),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => const RewardPenaltyScreen(initialTab: 1),
-                                      ),
-                                    );
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withOpacity(0.85),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.star_rounded,
-                                          size: 20,
-                                          color: totalPoints >= 0 ? Colors.amber.shade700 : Colors.red.shade600,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          s.rewardPenalty,
-                                          style: TextStyle(
-                                            fontSize: 13,
-                                            color: Colors.grey.shade700,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          '${totalPoints > 0 ? '+' : ''}$totalPoints점',
-                                          style: TextStyle(
-                                            fontSize: 18,
-                                            fontWeight: FontWeight.bold,
-                                            color: totalPoints < 0 ? Colors.red.shade600 : Colors.grey.shade800,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
+                                Icon(
+                                  Icons.star_rounded,
+                                  size: 20,
+                                  color: Colors.grey.shade600,
                                 ),
-                                const SizedBox(height: 8),
+                                const SizedBox(width: 6),
                                 Text(
-                                  s.pointNotice,
+                                  s.rewardPenalty,
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 14,
                                     color: Colors.grey.shade700,
                                   ),
                                 ),
                               ],
-                            );
-                          },
+                            ),
+                          ),
                         ),
                       ],
                     ),

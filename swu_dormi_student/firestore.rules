@@ -392,5 +392,15 @@ service cloud.firestore {
       allow update: if isAdmin();
       allow delete: if isAdmin();
     }
+
+    // Notification Requests collection (기기 푸시 발송 요청)
+    // 관리자/층장이 요청을 만들면 Cloud Function 이 읽어 FCM 으로 발송한다.
+    // 발송 결과(status/successCount 등)는 Function 이 기록하므로
+    // 클라이언트의 수정·삭제는 허용하지 않는다.
+    match /notification_requests/{requestId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+      allow update, delete: if false;
+    }
   }
 }

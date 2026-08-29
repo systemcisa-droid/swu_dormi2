@@ -40,6 +40,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isRedLogo = true;
   String? _bannerImageUrl;
   int _unreadChatCount = 0;
+  /// 사생수칙 동의서 제출 여부 (미제출 시 일부 메뉴 사용 불가)
+  bool _hasRegulationAgreement = false;
 
   @override
   void initState() {
@@ -48,12 +50,73 @@ class _HomeScreenState extends State<HomeScreen> {
     _setupNotificationListener();
     _setupChatListener();
     _loadBannerImage();
+    _loadRegulationAgreement();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkAndShowPopupNotice();
     });
   }
 
+  /// 사생수칙 동의서 제출 여부를 확인한다.
+  Future<void> _loadRegulationAgreement() async {
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('regulation_agreements')
+          .doc(user.uid)
+          .get();
+      if (mounted) {
+        setState(() => _hasRegulationAgreement = doc.exists);
+      }
+    } catch (e) {
+      debugPrint('사생수칙 동의 확인 오류: $e');
+    }
+  }
+
+  /// 동의서를 제출했는지 확인하고, 미제출이면 안내 후 false 를 반환한다.
+  Future<bool> _requireRegulationAgreement() async {
+    if (_hasRegulationAgreement) return true;
+
+    // 다른 기기에서 제출했을 수 있으므로 한 번 더 확인한다.
+    await _loadRegulationAgreement();
+    if (_hasRegulationAgreement) return true;
+
+    if (!mounted) return false;
+    final s = HomeStrings(
+        Provider.of<LocaleProvider>(context, listen: false).isEnglish);
+    final goToRegulation = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.regulationRequiredTitle),
+        content: Text(s.regulationRequiredContent),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.regulationRequiredClose),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.regulationRequiredGo),
+          ),
+        ],
+      ),
+    );
+
+    if (goToRegulation == true && mounted) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const RegulationScreen()),
+      );
+      // 동의서를 제출하고 돌아왔을 수 있으므로 다시 확인한다.
+      await _loadRegulationAgreement();
+    }
+    return false;
+  }
+
   Future<void> _checkAndShowPopupNotice() async {
+    // await 이후 context 접근을 피하기 위해 먼저 확보한다.
+    final s = HomeStrings(
+        Provider.of<LocaleProvider>(context, listen: false).isEnglish);
     try {
       final prefs = await SharedPreferences.getInstance();
       final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -76,7 +139,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final isEnabled = data['isEnabled'] as bool? ?? false;
       if (!isEnabled) return;
 
-      final title = (data['title'] as String?) ?? '공지사항';
+      final title = (data['title'] as String?) ?? s.popupNoticeDefaultTitle;
       final content = (data['content'] as String?) ?? '';
       final imageUrl = data['imageUrl'] as String?;
 
@@ -87,6 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
         content: content,
         imageUrl: imageUrl,
         todayStr: todayStr,
+        s: s,
       );
     } catch (e) {
       debugPrint('팝업 공지 로드 오류: $e');
@@ -98,6 +162,7 @@ class _HomeScreenState extends State<HomeScreen> {
     required String content,
     String? imageUrl,
     required String todayStr,
+    required HomeStrings s,
   }) {
     showDialog(
       context: context,
@@ -166,7 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (ctx.mounted) Navigator.pop(ctx);
                       },
                       child: Text(
-                        '오늘 하루 보지 않기',
+                        s.popupNoticeHideToday,
                         style: TextStyle(
                           color: Colors.grey.shade700,
                           fontSize: 13,
@@ -178,9 +243,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   Expanded(
                     child: TextButton(
                       onPressed: () => Navigator.pop(ctx),
-                      child: const Text(
-                        '닫기',
-                        style: TextStyle(
+                      child: Text(
+                        s.popupNoticeClose,
+                        style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                         ),
@@ -366,11 +431,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const FloorChatScreen()),
-              ),
-              tooltip: '층장단톡방',
+              onPressed: () async {
+                final navigator = Navigator.of(context);
+                if (!await _requireRegulationAgreement()) return;
+                navigator.push(
+                  MaterialPageRoute(builder: (_) => const FloorChatScreen()),
+                );
+              },
+              tooltip: s.floorChatTooltip,
             ),
           StreamBuilder<QuerySnapshot>(
             stream: user != null
@@ -531,10 +599,11 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(10),
                             onTap: () async {
-                              Navigator.pop(context);
+                              final navigator = Navigator.of(context);
+                              navigator.pop();
+                              if (!await _requireRegulationAgreement()) return;
                               // 층장이 스캔해 출석이 기록되면(true) 인원점검 화면으로 이동한다.
-                              final checkedIn = await Navigator.push<bool>(
-                                context,
+                              final checkedIn = await navigator.push<bool>(
                                 MaterialPageRoute(
                                   builder: (context) => MyQrCodePage(
                                     uid: user.uid,
@@ -632,9 +701,11 @@ class _HomeScreenState extends State<HomeScreen> {
             ListTile(
               leading: const Icon(Icons.build, color: Colors.red),
               title: Text(s.menuFacilityReport),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const FacilityReportScreen()));
+              onTap: () async {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                if (!await _requireRegulationAgreement()) return;
+                navigator.push(MaterialPageRoute(builder: (context) => const FacilityReportScreen()));
               },
             ),
             const Divider(height: 1),
@@ -646,9 +717,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   leading: const Icon(Icons.calendar_month, color: Colors.cyan),
                   title: Text(s.menuCleaningMonthly),
                   contentPadding: const EdgeInsets.only(left: 32, right: 16),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(
+                  onTap: () async {
+                    final navigator = Navigator.of(context);
+                    navigator.pop();
+                    if (!await _requireRegulationAgreement()) return;
+                    navigator.push(MaterialPageRoute(
                       builder: (context) => const CleaningInspectionScreen(inspectionType: 'monthly'),
                     ));
                   },
@@ -657,9 +730,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   leading: const Icon(Icons.exit_to_app, color: Colors.cyan),
                   title: Text(s.menuMoveOutCheck),
                   contentPadding: const EdgeInsets.only(left: 32, right: 16),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(
+                  onTap: () async {
+                    final navigator = Navigator.of(context);
+                    navigator.pop();
+                    if (!await _requireRegulationAgreement()) return;
+                    navigator.push(MaterialPageRoute(
                       builder: (context) => const MoveOutInspectionScreen(),
                     ));
                   },
@@ -670,22 +745,26 @@ class _HomeScreenState extends State<HomeScreen> {
             ListTile(
               leading: const Icon(Icons.fact_check, color: Colors.indigo),
               title: Text(s.menuAttendance),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const AttendanceScreen()));
+              onTap: () async {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                if (!await _requireRegulationAgreement()) return;
+                navigator.push(MaterialPageRoute(builder: (context) => const AttendanceScreen()));
               },
             ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.event_seat, color: Colors.indigo),
               title: Text(s.menuReservation),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const ReservationScreen()));
+              onTap: () async {
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                if (!await _requireRegulationAgreement()) return;
+                navigator.push(MaterialPageRoute(builder: (context) => const ReservationScreen()));
               },
             ),
             const Divider(height: 1),
-            _buildChatDrawerTile(context, user),
+            _buildChatDrawerTile(context, user, s),
             const Divider(height: 1),
             ExpansionTile(
               leading: const Icon(Icons.description, color: Colors.indigo),
@@ -717,7 +796,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildChatDrawerTile(BuildContext context, dynamic user) {
+  Widget _buildChatDrawerTile(BuildContext context, dynamic user, HomeStrings s) {
     final roomId = user != null
         ? buildRoomId(user.dormBuilding, user.building, user.roomNumber)
         : null;
@@ -767,10 +846,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
             ],
           ),
-          title: const Text('층장단톡(청검|인검 문의)'),
-          onTap: () {
-            Navigator.pop(context);
-            Navigator.push(context, MaterialPageRoute(
+          title: Text(s.menuFloorChat),
+          onTap: () async {
+            final navigator = Navigator.of(context);
+            navigator.pop();
+            if (!await _requireRegulationAgreement()) return;
+            navigator.push(MaterialPageRoute(
               builder: (context) => const FloorChatScreen(),
             ));
           },

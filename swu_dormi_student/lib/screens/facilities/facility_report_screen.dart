@@ -16,6 +16,30 @@ import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../utils/facility_report_strings.dart';
 
+/// 기숙사 건물과 호실 번호로 동(A동/B동)을 계산한다.
+///
+/// 국제생활관은 호실 번호만으로 동이 정해지므로, 저장된 building 값이
+/// '미배정'이어도 여기서 올바른 동을 구할 수 있다.
+/// '(겨울방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
+String? _wingFromRoom(String? dormBuilding, String roomNumber) {
+  if (dormBuilding == null || dormBuilding.isEmpty) return null;
+  final room = int.tryParse(roomNumber) ?? 0;
+  if (room == 0) return null;
+
+  if (dormBuilding.startsWith('국제생활관')) {
+    if ((room >= 101 && room <= 132) || (room >= 201 && room <= 229)) return 'A동';
+    if ((room >= 233 && room <= 260) || (room >= 301 && room <= 329)) return 'B동';
+    return null;
+  }
+  if (dormBuilding.startsWith('샬롬하우스')) {
+    final roomInFloor = room % 100;
+    if (roomInFloor >= 1 && roomInFloor <= 20) return 'A동';
+    if (roomInFloor >= 21 && roomInFloor <= 35) return 'B동';
+    return null;
+  }
+  return null;
+}
+
 class FacilityReportScreen extends StatefulWidget {
   const FacilityReportScreen({super.key});
 
@@ -396,8 +420,14 @@ class _FacilityReportFormState extends State<_FacilityReportForm> {
                     if (user != null && user.dormBuilding != null && user.dormBuilding!.isNotEmpty) ...[
                       _buildInfoRow(s.dormBuilding, user.dormBuilding!),
                       const SizedBox(height: 8),
-                      if (user.building.isNotEmpty)
-                        _buildInfoRow(s.area, user.building),
+                      // 저장된 building 이 '미배정' 일 수 있어 호실로 계산한 값을 우선한다.
+                      if ((_wingFromRoom(user.dormBuilding, user.roomNumber) ??
+                              user.building)
+                          .isNotEmpty)
+                        _buildInfoRow(
+                            s.area,
+                            _wingFromRoom(user.dormBuilding, user.roomNumber) ??
+                                user.building),
                       const SizedBox(height: 8),
                     ],
                     Row(
@@ -956,8 +986,17 @@ class _FacilityReportListState extends State<_FacilityReportList> {
                       if (report.dormBuilding != null && report.dormBuilding!.isNotEmpty) ...[
                         _buildDetailRow(Icons.home_work, s.dormBuilding, report.dormBuilding!),
                         const SizedBox(height: 12),
-                        if (report.building != null && report.building!.isNotEmpty)
-                          _buildDetailRow(Icons.apartment, s.area, report.building!),
+                        if ((_wingFromRoom(
+                                    report.dormBuilding, report.roomNumber) ??
+                                report.building ??
+                                '')
+                            .isNotEmpty)
+                          _buildDetailRow(
+                              Icons.apartment,
+                              s.area,
+                              _wingFromRoom(report.dormBuilding,
+                                      report.roomNumber) ??
+                                  report.building!),
                         const SizedBox(height: 12),
                       ],
                       Row(

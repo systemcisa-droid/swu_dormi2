@@ -7,14 +7,43 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/locale_provider.dart';
+import '../../utils/floor_chat_strings.dart';
 import 'chat_media.dart';
 import 'chat_upload.dart';
+
+/// 기숙사 건물과 호실 번호로 동(A동/B동)을 계산한다.
+///
+/// 국제생활관은 호실 번호만으로 동이 정해지므로, 저장된 building 값이
+/// '미배정'이어도 여기서 올바른 동을 구할 수 있다.
+/// '(겨울방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
+String? _wingFromRoom(String dormBuilding, String roomNumber) {
+  final room = int.tryParse(roomNumber) ?? 0;
+  if (room == 0) return null;
+
+  if (dormBuilding.startsWith('국제생활관')) {
+    if ((room >= 101 && room <= 132) || (room >= 201 && room <= 229)) return 'A동';
+    if ((room >= 233 && room <= 260) || (room >= 301 && room <= 329)) return 'B동';
+    return null;
+  }
+  if (dormBuilding.startsWith('샬롬하우스')) {
+    final roomInFloor = room % 100;
+    if (roomInFloor >= 1 && roomInFloor <= 20) return 'A동';
+    if (roomInFloor >= 21 && roomInFloor <= 35) return 'B동';
+    return null;
+  }
+  return null;
+}
 
 // roomId: 샬롬하우스_A동_301호 (호실 단위 채팅방)
 String? buildRoomId(String? dormBuilding, String building, String roomNumber) {
   if (dormBuilding == null || dormBuilding.isEmpty) return null;
-  if (building == '미배정' || roomNumber.isEmpty || roomNumber == '000') return null;
-  return '${dormBuilding}_${building}_$roomNumber호';
+  if (roomNumber.isEmpty || roomNumber == '000') return null;
+  // 저장된 building 이 '미배정' 이어도 호실로 동을 계산해 채팅방을 찾는다.
+  final wing = _wingFromRoom(dormBuilding, roomNumber) ??
+      (building == '미배정' || building.isEmpty ? null : building);
+  if (wing == null) return null;
+  return '${dormBuilding}_${wing}_$roomNumber호';
 }
 
 class FloorChatScreen extends StatefulWidget {
@@ -32,6 +61,10 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
   /// 첨부 업로드 진행 상태 (압축/업로드 중 입력창에 표시)
   final _uploadingNotifier = ValueNotifier<String?>(null);
   int _prevDocCount = 0;
+
+  /// 현재 언어 설정에 맞는 문자열
+  FloorChatStrings get _s => FloorChatStrings(
+      Provider.of<LocaleProvider>(context, listen: false).isEnglish);
 
   @override
   void initState() {
@@ -79,6 +112,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     // 파일 선택 전에 읽어둔다 (await 이후 context 사용을 피하기 위해)
     final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
     if (user == null) return;
+    final s = _s;
 
     try {
       final picked = isVideo
@@ -88,7 +122,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
 
       File file = picked;
       if (isVideo) {
-        _uploadingNotifier.value = '영상 압축 중...';
+        _uploadingNotifier.value = s.compressingVideo;
         file = await ChatUpload.compressVideo(picked);
       }
 
@@ -97,13 +131,14 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
         _uploadingNotifier.value = null;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('파일이 너무 큽니다. 더 짧은 영상을 선택해주세요')),
+            SnackBar(content: Text(s.fileTooLarge)),
           );
         }
         return;
       }
 
-      _uploadingNotifier.value = isVideo ? '영상 업로드 중...' : '사진 업로드 중...';
+      _uploadingNotifier.value =
+          isVideo ? s.uploadingVideo : s.uploadingImage;
       final url = await ChatUpload.upload(
         file: file,
         roomId: roomId,
@@ -126,14 +161,14 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
       });
 
       await _firestore.collection('floor_chats').doc(roomId).set({
-        'lastMessage': isVideo ? '[영상]' : '[사진]',
+        'lastMessage': isVideo ? s.lastMessageVideo : s.lastMessageImage,
         'lastAt': FieldValue.serverTimestamp(),
         'roomId': roomId,
       }, SetOptions(merge: true));
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('전송 오류: $e')));
+            .showSnackBar(SnackBar(content: Text(s.sendError(e))));
       }
     } finally {
       _uploadingNotifier.value = null;
@@ -149,7 +184,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.photo_library, color: Colors.cyan),
-              title: const Text('사진 선택'),
+              title: Text(_s.pickImage),
               onTap: () {
                 Navigator.pop(ctx);
                 _sendMedia(roomId, senderName, roomNumber,
@@ -158,9 +193,9 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.video_library, color: Colors.cyan),
-              title: const Text('영상 선택'),
-              subtitle: const Text('최대 1분 · 업로드 시 압축됩니다',
-                  style: TextStyle(fontSize: 11)),
+              title: Text(_s.pickVideo),
+              subtitle: Text(_s.pickVideoHint,
+                  style: const TextStyle(fontSize: 11)),
               onTap: () {
                 Navigator.pop(ctx);
                 _sendMedia(roomId, senderName, roomNumber,
@@ -179,6 +214,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     if (text.isEmpty) return;
 
     _sendingNotifier.value = true;
+    final s = _s;
     try {
       final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
       if (user == null) return;
@@ -206,7 +242,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('전송 오류: $e')));
+            .showSnackBar(SnackBar(content: Text(s.sendError(e))));
       }
     } finally {
       _sendingNotifier.value = false;
@@ -249,10 +285,12 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('층장단톡방', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(_s.title,
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold)),
             if (user != null && roomId != null)
               Text(
-                '${user.roomNumber}호 채팅방',
+                _s.roomChatSubtitle(user.roomNumber),
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
               ),
           ],
@@ -281,14 +319,14 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          '${user!.roomNumber}호 ↔ 층장 채팅방',
+                          _s.roomChatBanner(user!.roomNumber),
                           style: TextStyle(fontSize: 12, color: Colors.cyan.shade800),
                         ),
                       ),
                       Icon(Icons.access_time, size: 13, color: Colors.cyan.shade600),
                       const SizedBox(width: 4),
                       Text(
-                        '이용시간 09:00 ~ 00:30',
+                        _s.usageHours,
                         style: TextStyle(fontSize: 11, color: Colors.cyan.shade700),
                       ),
                     ],
@@ -310,10 +348,11 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
           children: [
             Icon(Icons.chat_bubble_outline, size: 64, color: Colors.grey.shade300),
             const SizedBox(height: 16),
-            const Text('기숙사/호실 정보가 없습니다',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            Text(_s.noRoomInfoTitle,
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
-            Text('프로필에서 기숙사와 호실을 먼저 입력해주세요',
+            Text(_s.noRoomInfoHint,
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                 textAlign: TextAlign.center),
           ],
@@ -342,7 +381,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
               children: [
                 Icon(Icons.chat_bubble_outline, size: 48, color: Colors.grey.shade300),
                 const SizedBox(height: 12),
-                Text('첫 메시지를 보내보세요!',
+                Text(_s.emptyMessages,
                     style: TextStyle(color: Colors.grey.shade500, fontSize: 14)),
               ],
             ),
@@ -380,14 +419,16 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
 
             String? dateDivider;
             if (index == 0 && ts != null) {
-              dateDivider = DateFormat('yyyy년 MM월 dd일 (E)', 'ko').format(ts.toDate());
+              dateDivider =
+                  DateFormat(_s.dateFormat, _s.dateLocale).format(ts.toDate());
             } else if (index > 0 && ts != null) {
               final prevTs = (docs[index - 1].data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
               if (prevTs != null) {
                 final prev = prevTs.toDate();
                 final curr = ts.toDate();
                 if (prev.day != curr.day || prev.month != curr.month || prev.year != curr.year) {
-                  dateDivider = DateFormat('yyyy년 MM월 dd일 (E)', 'ko').format(curr);
+                  dateDivider =
+                      DateFormat(_s.dateFormat, _s.dateLocale).format(curr);
                 }
               }
             }
@@ -440,7 +481,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
     final bubbleColor = isMine ? Colors.cyan.shade500 : Colors.white;
     final textColor = isMine ? Colors.white : Colors.black87;
-    final nameLabel = roomNumber == '층장' ? '$senderName (층장)' : '$senderName ($roomNumber호)';
+    final nameLabel = _s.senderLabel(senderName, roomNumber);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
@@ -541,7 +582,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
               Icon(Icons.bedtime_outlined, size: 16, color: Colors.grey.shade500),
               const SizedBox(width: 6),
               Text(
-                '00:30 ~ 09:00 사이에는 채팅을 이용할 수 없습니다',
+                _s.restrictedTime,
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
               ),
             ],
@@ -605,7 +646,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                         ? Colors.grey.shade300
                         : Colors.cyan.shade600,
                   ),
-                  tooltip: '사진/영상 첨부',
+                  tooltip: _s.attachTooltip,
                 ),
               ),
               Expanded(
@@ -615,7 +656,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                   maxLines: 4,
                   textInputAction: TextInputAction.newline,
                   decoration: InputDecoration(
-                    hintText: '메시지를 입력하세요...',
+                    hintText: _s.inputHint,
                     hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     border: OutlineInputBorder(

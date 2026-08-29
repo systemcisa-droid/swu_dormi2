@@ -103,6 +103,16 @@ class CleaningInspectionStrings {
   // ── 신청 다이얼로그 ──
   String get residenceInfoRequired =>
       _t('기숙사 건물, 호실, 자리번호를 먼저 등록해주세요 (내 정보 수정)', 'Please register your dormitory building, room, and seat number first (Edit Profile)');
+  // 퇴사청소 신청 전 퇴사확인 서명 필요
+  String get moveOutSignatureRequiredTitle =>
+      _t('퇴사확인 서명 필요', 'Signature Required');
+  String get moveOutSignatureRequiredContent => _t(
+      '퇴사청소 점검은 퇴사확인 서명을 제출한 후 신청할 수 있습니다.\n\n'
+      '지금 퇴사확인 페이지로 이동하시겠습니까?',
+      'You can request a move-out cleaning inspection after submitting your move-out confirmation signature.\n\n'
+      'Would you like to go to the move-out confirmation page now?');
+  String get moveOutSignatureRequiredClose => _t('닫기', 'Close');
+  String get moveOutSignatureRequiredGo => _t('이동', 'Go');
   String get applyDialogTitle => _t('청소점검 신청', 'Cleaning Inspection Request');
   String dateLabel(String date) => _t('날짜: $date', 'Date: $date');
   String timeLabel(String start, String end) => _t('시간: $start ~ $end', 'Time: $start ~ $end');

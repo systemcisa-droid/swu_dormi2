@@ -7,6 +7,10 @@ class RewardPenaltyStrings {
   String get title => _t('상벌점', 'Reward/Penalty Points');
   String get tabCriteria => _t('기준표', 'Criteria');
   String get tabHistory => _t('이력', 'History');
+  String get pointCheckNotice => _t(
+      '개인별 상벌점 이력은 종합정보시스템에서 반드시 확인 바랍니다. 벌점 16점 이상은 즉시 퇴사 대상입니다.',
+      'Please check your reward/penalty history on the university information system. '
+      '16 or more penalty points results in immediate move-out.');
 
   String get userDataUnavailable => _t('사용자 정보를 불러올 수 없습니다', 'Unable to load user information');
   String genericError(Object e) => _t('오류가 발생했습니다: $e', 'An error occurred: $e');

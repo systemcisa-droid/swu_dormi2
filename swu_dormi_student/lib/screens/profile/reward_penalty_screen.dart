@@ -45,10 +45,28 @@ class _RewardPenaltyScreenState extends State<RewardPenaltyScreen> {
           ),
           const Divider(height: 1),
           // 탭 콘텐츠
+          // 이력 탭은 기숙사관리행정실 요청으로 내용을 감추고 안내 문구만 표시한다.
           Expanded(
-            child: _selectedTab == 0 ? _buildCriteriaTab(s, isEnglish) : _buildHistoryTab(s, isEnglish),
+            child: _selectedTab == 0
+                ? _buildCriteriaTab(s, isEnglish)
+                : _buildHistoryNotice(s),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 이력 탭 자리에 표시하는 안내 문구.
+  Widget _buildHistoryNotice(RewardPenaltyStrings s) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Text(
+        s.pointCheckNotice,
+        style: TextStyle(
+          fontSize: 13,
+          height: 1.5,
+          color: Colors.grey.shade700,
+        ),
       ),
     );
   }
@@ -115,6 +133,8 @@ class _RewardPenaltyScreenState extends State<RewardPenaltyScreen> {
 
   // ===== 이력 탭 =====
 
+  // 이력 탭 재활성화 시 사용 (현재 비활성화)
+  // ignore: unused_element
   Widget _buildHistoryTab(RewardPenaltyStrings s, bool isEnglish) {
     final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
     if (user == null) {
