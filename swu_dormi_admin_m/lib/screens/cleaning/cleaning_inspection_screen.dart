@@ -200,6 +200,8 @@ class CleaningInspectionScreenState extends State<CleaningInspectionScreen>
 // 점검 구역 목록
 // ══════════════════════════════════════════════════════════════
 const List<String> kFloorOptions = [
+  // A동 1층은 107~109호만 존재하는 예외 구역
+  '샬롬하우스 A동 1층',
   '샬롬하우스 A동 2층',
   '샬롬하우스 A동 3층',
   '샬롬하우스 A동 4층',
@@ -220,6 +222,10 @@ const List<String> kFloorOptions = [
   '샬롬하우스(겨울방학) A동 5층',
   '샬롬하우스(겨울방학) A동 6층',
   '샬롬하우스(겨울방학) A동 7층',
+  '국제생활관(겨울방학) A동 1층',
+  '국제생활관(겨울방학) A동 2층',
+  '국제생활관(겨울방학) B동 2층',
+  '국제생활관(겨울방학) B동 3층',
 ];
 
 // ══════════════════════════════════════════════════════════════
@@ -373,6 +379,7 @@ class _CleaningInspectionContentState
     String? scheduleBuilding;
     if (scheduleFloor.startsWith('샬롬하우스(겨울방학)')) { scheduleBuilding = '샬롬하우스(겨울방학)'; }
     else if (scheduleFloor.startsWith('샬롬하우스')) { scheduleBuilding = '샬롬하우스'; }
+    else if (scheduleFloor.startsWith('국제생활관(겨울방학)')) { scheduleBuilding = '국제생활관(겨울방학)'; }
     else if (scheduleFloor.startsWith('국제생활관')) { scheduleBuilding = '국제생활관'; }
     else if (scheduleFloor.startsWith('바롬인성교육관')) { scheduleBuilding = '바롬인성교육관'; }
 
@@ -1242,12 +1249,28 @@ class _CleaningInspectionContentState
     );
   }
 
+  /// '샬롬하우스 A동 3층' 같은 구역 문자열에서 건물명만 뽑는다.
+  static String? _buildingFromFloorLabel(String? floor) {
+    if (floor == null || floor.isEmpty) return null;
+    if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
+    if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
+    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
+    if (floor.startsWith('국제생활관')) return '국제생활관';
+    if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
+    return null;
+  }
+
   Future<void> _navigateToRoomHistory(String roomNumber) async {
     try {
-      final snap = await _firestore
+      // 같은 호실 번호가 여러 건물에 존재하므로 건물로도 걸러야 한다.
+      final building = _buildingFromFloorLabel(_selectedFloorFilter);
+      var reqQuery = _firestore
           .collection('cleaning_requests')
-          .where('roomNumber', isEqualTo: roomNumber)
-          .get();
+          .where('roomNumber', isEqualTo: roomNumber);
+      if (building != null) {
+        reqQuery = reqQuery.where('dormBuilding', isEqualTo: building);
+      }
+      final snap = await reqQuery.get();
       final requests = snap.docs
         ..sort((a, b) {
           final aT = (a.data()['createdAt'] as Timestamp?)?.toDate() ?? DateTime(0);
@@ -1298,6 +1321,9 @@ class _CleaningInspectionContentState
             goodCount: goodCount,
             poorCount: poorCount,
             inspectionType: widget.inspectionType,
+            // 담당 구역에서 건물명을 도출해 넘긴다.
+            // (없으면 같은 호실 번호의 타 건물 학생이 섞여 나온다)
+            building: _buildingFromFloorLabel(_selectedFloorFilter),
           ),
         ),
       );
@@ -1862,6 +1888,8 @@ class _CleaningInspectionContentState
         scheduleBuilding = '샬롬하우스(겨울방학)';
       } else if (floorStr.startsWith('샬롬하우스')) {
         scheduleBuilding = '샬롬하우스';
+      } else if (floorStr.startsWith('국제생활관(겨울방학)')) {
+        scheduleBuilding = '국제생활관(겨울방학)';
       } else if (floorStr.startsWith('국제생활관')) {
         scheduleBuilding = '국제생활관';
       } else if (floorStr.startsWith('바롬인성교육관')) {
@@ -2777,6 +2805,7 @@ class _RoomInspectionHistoryContentState
     if (floor == null || floor.isEmpty) return null;
     if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
+    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;
@@ -2798,9 +2827,10 @@ class _RoomInspectionHistoryContentState
   static int _buildingOrder(String key) {
     if (key.startsWith('샬롬하우스(겨울방학)')) return 3;
     if (key.startsWith('샬롬하우스')) return 0;
+    if (key.startsWith('국제생활관(겨울방학)')) return 4;
     if (key.startsWith('국제생활관')) return 1;
     if (key.startsWith('바롬인성교육관')) return 2;
-    return 4;
+    return 5;
   }
 
   // 그룹 키 → 호실번호: '샬롬하우스|302|uid' → '302', '샬롬하우스|302' → '302', '302' → '302'
@@ -2883,30 +2913,6 @@ class _RoomInspectionHistoryContentState
 
   // 사생 기본 정보 엑셀에서 전체 명단을 로드한다.
   // 부가 기능이므로 실패해도 조용히 빈 리스트를 반환한다.
-  Future<List<ExcelStudentRow>> _loadExcelStudentRows() async {
-    try {
-      final settingsDoc =
-          await FirebaseFirestore.instance.collection('settings').doc('home').get();
-      final excelUrl = settingsDoc.data()?['studentInfoExcelUrl'] as String?;
-      if (excelUrl == null || excelUrl.trim().isEmpty) return [];
-
-      final response = await http.get(Uri.parse(excelUrl));
-      if (response.statusCode != 200) return [];
-
-      final excel = Excel.decodeBytes(response.bodyBytes);
-      final sheet = excel.sheets.values.first;
-      final rows = sheet.rows
-          .map((row) => row.map((cell) => cell?.value?.toString() ?? '').toList())
-          .toList();
-      if (rows.isEmpty) return [];
-
-      final header = rows.first;
-      return rows.skip(1).map((row) => ExcelStudentRow.fromRow(header, row)).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
   // ── 데이터 로드 ──
   Future<void> _loadData({bool showLoading = true}) async {
     setState(() {
@@ -2917,9 +2923,6 @@ class _RoomInspectionHistoryContentState
       final requestsSnap = await _firestore.collection('cleaning_requests').get();
       final schedulesSnap = await _firestore.collection('cleaning_schedules').get();
       final usersSnap = await _firestore.collection('users').get();
-      final excelRows = widget.fixedType == 'move_out'
-          ? await _loadExcelStudentRows()
-          : <ExcelStudentRow>[];
 
       final scheduleMap = <String, Map<String, dynamic>>{};
       for (final doc in schedulesSnap.docs) {
@@ -3032,35 +3035,8 @@ class _RoomInspectionHistoryContentState
           };
         }
 
-        // 퇴사검사: 엑셀 명단에만 있고 아직 회원가입하지 않은 학생도 빈 카드 추가.
-        // 가입 여부 판단은 이메일만 기준으로 한다(학번 사용 금지).
-        if (excelRows.isNotEmpty) {
-          final registeredEmails = usersSnap.docs
-              .map((d) => (d.data()['email']?.toString() ?? '').trim().toLowerCase())
-              .where((v) => v.isNotEmpty)
-              .toSet();
-
-          for (final row in excelRows) {
-            if (!row.hasMatchKey) continue;
-            final rowEmail = row.normalizedEmail;
-            if (rowEmail != null && registeredEmails.contains(rowEmail)) continue;
-            final room = (row.roomNumber ?? '').trim();
-            if (room.isEmpty) continue;
-            final dorm = (row.dormBuilding ?? '').trim();
-            final excelId = rowEmail ?? (row.studentId ?? '').trim();
-            if (excelId.isEmpty) continue;
-            final groupKey = dorm.isNotEmpty
-                ? '$dorm|$room|excel:$excelId'
-                : '|$room|excel:$excelId';
-            grouped.putIfAbsent(groupKey, () => []);
-            personInfoByKey[groupKey] = {
-              'name': row.name ?? '',
-              'seatNumber': (row.seatNumber ?? '').trim(),
-              'residentStatus': '재실중',
-              'isUnregistered': 'true',
-            };
-          }
-        }
+        // 퇴사검사 학생 이력은 앱 가입자만 표시한다.
+        // (엑셀 명단의 미가입자는 카드로 추가하지 않는다)
       }
 
       // 월검사: 거주 학생 호실 + 고정 호실 목록 추가 (이력 없어도 표시)
@@ -3072,6 +3048,7 @@ class _RoomInspectionHistoryContentState
         for (final floor in kFloorOptions) {
           final dorm = floor.startsWith('샬롬하우스(겨울방학)') ? '샬롬하우스(겨울방학)'
               : floor.startsWith('샬롬하우스') ? '샬롬하우스'
+              : floor.startsWith('국제생활관(겨울방학)') ? '국제생활관(겨울방학)'
               : floor.startsWith('국제생활관') ? '국제생활관'
               : floor.startsWith('바롬인성교육관') ? '바롬인성교육관'
               : null;
@@ -3104,9 +3081,14 @@ class _RoomInspectionHistoryContentState
             final wing = floor.contains('A동') ? 'A동' : floor.contains('B동') ? 'B동' : null;
             if (wing == null) continue;
             final base = floorNum * 100;
-            roomNums = wing == 'A동'
-                ? [for (var i = base + 1; i <= base + 20; i++) i]
-                : [for (var i = base + 21; i <= base + 35; i++) i];
+            if (wing == 'A동' && floorNum == 1) {
+              // A동 1층은 107~109호만 존재하는 예외 구역
+              roomNums = const [107, 108, 109];
+            } else {
+              roomNums = wing == 'A동'
+                  ? [for (var i = base + 1; i <= base + 20; i++) i]
+                  : [for (var i = base + 21; i <= base + 35; i++) i];
+            }
           }
 
           for (final roomNum in roomNums) {
@@ -3924,12 +3906,16 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
   });
 
   String? _detectBuilding() {
+    // 호출부에서 건물을 알려준 경우 그 값을 최우선으로 쓴다.
+    // (점검 이력이 없으면 아래 스케줄 기반 추론이 불가능해 건물 구분이 사라진다)
+    if (building != null && building!.isNotEmpty) return building;
     for (final req in requests) {
       final data = req.data() as Map<String, dynamic>;
       final sId = data['scheduleId'] as String?;
       if (sId != null && scheduleMap.containsKey(sId)) {
         final floor = (scheduleMap[sId]?['floor'] ?? '') as String;
         if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
+        if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
         if (floor.startsWith('국제생활관')) return '국제생활관';
         if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
       }
@@ -3956,8 +3942,13 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
           .toList();
       if (rows.isEmpty) return [];
 
-      final header = rows.first;
-      return rows.skip(1).map((row) => ExcelStudentRow.fromRow(header, row)).toList();
+      // 첫 줄이 제목 행일 수 있으므로 실제 헤더 행을 찾는다.
+      final headerIdx = ExcelStudentRow.findHeaderRowIndex(rows);
+      final header = rows[headerIdx];
+      return rows
+          .skip(headerIdx + 1)
+          .map((row) => ExcelStudentRow.fromRow(header, row))
+          .toList();
     } catch (_) {
       return [];
     }

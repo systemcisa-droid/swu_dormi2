@@ -557,8 +557,15 @@ class _SettingsPageState extends State<_SettingsPage> {
         return;
       }
 
-      final excelHeader = rows.first;
-      final excelDataRows = rows.skip(1).toList();
+      // 엑셀 첫 줄이 '2026학년도 2학기 학생정보' 같은 제목 행일 수 있으므로,
+      // '학번' 열이 있는 행을 실제 헤더로 찾는다. (없으면 첫 줄을 헤더로 사용)
+      int headerRowIndex = rows.indexWhere(
+        (r) => r.any((h) => h.replaceAll(' ', '').contains('학번')),
+      );
+      if (headerRowIndex == -1) headerRowIndex = 0;
+
+      final excelHeader = rows[headerRowIndex];
+      final excelDataRows = rows.skip(headerRowIndex + 1).toList();
 
       // 학번 열 인덱스 탐색 (공백 제거 후 비교)
       final studentIdColIndex = excelHeader.indexWhere((h) => h.replaceAll(' ', '').contains('학번'));
@@ -571,35 +578,56 @@ class _SettingsPageState extends State<_SettingsPage> {
             .where('role', isEqualTo: 'student')
             .get();
         for (final doc in usersSnap.docs) {
-          final sid = doc.data()['studentId']?.toString().trim() ?? '';
-          if (sid.isNotEmpty) usersByStudentId[sid] = doc.data();
+          // 필드가 하나도 없는 문서는 data()가 null을 반환해 크래시하므로 건너뛴다.
+          final userData = doc.data() as Map<String, dynamic>?;
+          if (userData == null) continue;
+          final sid = userData['studentId']?.toString().trim() ?? '';
+          if (sid.isNotEmpty) usersByStudentId[sid] = userData;
         }
       }
 
-      const extraColumns = ['인실', '학과', '휴대폰', '자리번호'];
-      final header = studentIdColIndex != -1 ? [...excelHeader, ...extraColumns] : excelHeader;
+      // 엑셀 원본에 이미 있는 열은 앱에서 다시 붙이지 않는다.
+      // (엑셀에 '인실/학과/휴대폰/자리번호'가 이미 있어 중복 표시되던 문제)
+      String norm(String s) => s.replaceAll(RegExp(r'\s+'), '');
+      bool excelHas(List<String> keywords) =>
+          excelHeader.any((h) => keywords.any((k) => norm(h).contains(k)));
+
+      final extraLabels = <String>[];
+      final extraGetters = <String Function(UserModel)>[];
+      void addExtra(String label, List<String> keys, String Function(UserModel) get) {
+        if (excelHas(keys)) return;
+        extraLabels.add(label);
+        extraGetters.add(get);
+      }
+
+      addExtra('인실', ['인실'], (u) => u.roomCapacity);
+      addExtra('학과', ['학과', '학부'], (u) => u.department ?? '');
+      addExtra('휴대폰', ['휴대폰', '전화'], (u) => u.phoneNumber);
+      addExtra('자리번호', ['자리번호'], (u) => u.seatNumber ?? '');
+
+      final header = studentIdColIndex != -1
+          ? [...excelHeader, ...extraLabels]
+          : excelHeader;
+
+      // 학번이 users에 존재하는지를 별도로 기록한다.
+      // (조회된 값이 비어 있어도 '매칭'은 성공한 것으로 세야 한다)
+      final matchedFlags = <bool>[];
       final dataRows = excelDataRows.map((row) {
-        if (studentIdColIndex == -1) return row;
+        if (studentIdColIndex == -1) {
+          matchedFlags.add(false);
+          return row;
+        }
         final sid = (studentIdColIndex < row.length ? row[studentIdColIndex] : '').trim();
         final userData = usersByStudentId[sid];
+        matchedFlags.add(userData != null);
         if (userData == null) {
-          return [...row, '', '', '', ''];
+          return [...row, ...extraLabels.map((_) => '')];
         }
         final user = UserModel.fromMap(userData);
-        return [
-          ...row,
-          user.roomCapacity,
-          user.department ?? '',
-          user.phoneNumber,
-          user.seatNumber ?? '',
-        ];
+        return [...row, ...extraGetters.map((g) => g(user))];
       }).toList();
 
-      final matchedCount = dataRows.where((row) {
-        if (studentIdColIndex == -1) return false;
-        final extraStart = excelHeader.length;
-        return extraStart < row.length && row[extraStart].isNotEmpty;
-      }).length;
+      final matchedCount = matchedFlags.where((m) => m).length;
 
       await showDialog(
         context: context,
@@ -637,8 +665,8 @@ class _SettingsPageState extends State<_SettingsPage> {
                       scrollDirection: Axis.horizontal,
                       child: SingleChildScrollView(
                         child: DataTable(
-                          columnSpacing: 20,
-                          horizontalMargin: 12,
+                          columnSpacing: 10,
+                          horizontalMargin: 8,
                           headingRowHeight: 36,
                           dataRowMinHeight: 32,
                           dataRowMaxHeight: 40,

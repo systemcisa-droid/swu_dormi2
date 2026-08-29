@@ -25,6 +25,22 @@ class ExcelStudentRow {
     this.phoneNumber,
   });
 
+  /// 실제 헤더가 있는 행의 인덱스를 찾는다.
+  ///
+  /// 엑셀 첫 줄이 '2026학년도 2학기 학생정보' 같은 제목 행인 경우가 있어
+  /// 첫 줄을 무조건 헤더로 쓰면 컬럼 매핑이 전부 실패한다.
+  /// '학번'/'성명'/'이름' 이 있는 첫 행을 헤더로 판단하고, 없으면 0을 반환한다.
+  static int findHeaderRowIndex(List<List<String>> rows) {
+    for (int i = 0; i < rows.length; i++) {
+      final normalized =
+          rows[i].map((h) => h.replaceAll(RegExp(r'\s+'), '')).toList();
+      final hasKey = normalized.any((h) =>
+          h.contains('학번') || h.contains('성명') || h.contains('이름'));
+      if (hasKey) return i;
+    }
+    return 0;
+  }
+
   /// 헤더 텍스트 기반 자동 컬럼 매핑.
   ///
   /// 헤더를 공백 제거·소문자화한 뒤 키워드 포함 여부로 컬럼 인덱스를 판단한다.

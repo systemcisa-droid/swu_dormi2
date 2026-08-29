@@ -158,9 +158,13 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           .toList();
       if (rows.isEmpty) return;
 
-      final header = rows.first;
-      final excelRows =
-          rows.skip(1).map((row) => ExcelStudentRow.fromRow(header, row)).toList();
+      // 첫 줄이 제목 행일 수 있으므로 실제 헤더 행을 찾는다.
+      final headerIdx = ExcelStudentRow.findHeaderRowIndex(rows);
+      final header = rows[headerIdx];
+      final excelRows = rows
+          .skip(headerIdx + 1)
+          .map((row) => ExcelStudentRow.fromRow(header, row))
+          .toList();
 
       final usersSnap = await _firestore
           .collection('users')
@@ -1676,7 +1680,10 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
 
     if (dormBuilding == '샬롬하우스') {
       // A동: floor×100 + 01~20 / B동: floor×100 + 21~35
-      if (building == 'A') {
+      // 단, A동 1층은 107~109호만 존재하는 예외 구역
+      if (building == 'A' && floorNum == 1) {
+        candidateRooms = const ['107', '108', '109'];
+      } else if (building == 'A') {
         candidateRooms = List.generate(20, (i) => '${floorNum * 100 + i + 1}');
       } else if (building == 'B') {
         candidateRooms = List.generate(15, (i) => '${floorNum * 100 + 21 + i}');
@@ -2336,6 +2343,7 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
     if (floor == null) return null;
     if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
+    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;
@@ -2351,7 +2359,10 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
     if (floorNum == null) return {};
 
     if (dormBuilding == '샬롬하우스') {
-      if (building == 'A') {
+      // A동 1층은 107~109호만 존재하는 예외 구역
+      if (building == 'A' && floorNum == 1) {
+        return const {'107', '108', '109'};
+      } else if (building == 'A') {
         return List.generate(20, (i) => '${floorNum * 100 + i + 1}').toSet();
       } else if (building == 'B') {
         return List.generate(15, (i) => '${floorNum * 100 + 21 + i}').toSet();

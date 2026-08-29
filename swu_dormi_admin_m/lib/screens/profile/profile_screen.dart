@@ -40,6 +40,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     '샬롬하우스(겨울방학) A동 5층',
     '샬롬하우스(겨울방학) A동 6층',
     '샬롬하우스(겨울방학) A동 7층',
+    '국제생활관(겨울방학) A동 1층',
+    '국제생활관(겨울방학) A동 2층',
+    '국제생활관(겨울방학) B동 2층',
+    '국제생활관(겨울방학) B동 3층',
   ];
 
   static const List<String> _dormBuildingOptions = [

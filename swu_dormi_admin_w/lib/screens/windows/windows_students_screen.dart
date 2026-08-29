@@ -272,9 +272,11 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
         return;
       }
 
-      final header = rows.first;
+      // 첫 줄이 제목 행일 수 있으므로 실제 헤더 행을 찾는다.
+      final headerIdx = ExcelStudentRow.findHeaderRowIndex(rows);
+      final header = rows[headerIdx];
       final excelRows = rows
-          .skip(1)
+          .skip(headerIdx + 1)
           .map((row) => ExcelStudentRow.fromRow(header, row))
           .toList();
 
@@ -558,8 +560,13 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
       final sheet = excel.sheets.values.first;
       final rows = sheet.rows.map((row) => row.map((cell) => cell?.value?.toString() ?? '').toList()).toList();
       if (rows.isEmpty) throw Exception('엑셀 파일에 데이터가 없습니다.');
-      final header = rows.first;
-      final excelRows = rows.skip(1).map((row) => ExcelStudentRow.fromRow(header, row)).toList();
+      // 첫 줄이 제목 행일 수 있으므로 실제 헤더 행을 찾는다.
+      final headerIdx = ExcelStudentRow.findHeaderRowIndex(rows);
+      final header = rows[headerIdx];
+      final excelRows = rows
+          .skip(headerIdx + 1)
+          .map((row) => ExcelStudentRow.fromRow(header, row))
+          .toList();
 
       final targetEmail = student.email.trim().toLowerCase();
       ExcelStudentRow? matched;
@@ -722,7 +729,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
     String selectedResidentStatus = student.residentStatus;
 
     // 호실 드롭다운(건물+동+층 → 호실 목록)용 초기 동/층을 기존 호실번호에서 역산한다.
-    final isIntlInit = selectedDormBuilding == '국제생활관';
+    final isIntlInit = (selectedDormBuilding ?? '').startsWith('국제생활관');
     String? selectedWing = isIntlInit
         ? _getIntlWing(student.roomNumber)
         : _getBuilding(student.roomNumber);
@@ -803,6 +810,9 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                       ComboBoxItem(value: '국제생활관', child: Text('국제생활관')),
                       ComboBoxItem(value: '바롬인성교육관', child: Text('바롬인성교육관')),
                       ComboBoxItem(value: '샬롬하우스(겨울방학)', child: Text('샬롬하우스(겨울방학)')),
+                      ComboBoxItem(
+                          value: '국제생활관(겨울방학)',
+                          child: Text('국제생활관(겨울방학)')),
                     ],
                     onChanged: (v) => setDialogState(() {
                       selectedDormBuilding = v;
@@ -817,7 +827,8 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                   const SizedBox(height: 8),
                   if (selectedDormBuilding == '샬롬하우스' ||
                       selectedDormBuilding == '샬롬하우스(겨울방학)' ||
-                      selectedDormBuilding == '국제생활관') ...[
+                      selectedDormBuilding == '국제생활관' ||
+                      selectedDormBuilding == '국제생활관(겨울방학)') ...[
                     Row(
                       children: [
                         Expanded(
@@ -842,9 +853,13 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                             value: selectedFloor,
                             isExpanded: true,
                             placeholder: const Text('층'),
-                            items: (selectedDormBuilding == '국제생활관'
+                            // 샬롬하우스는 A동만 1층이 있고 B동은 2층부터다.
+                            items: ((selectedDormBuilding ?? '')
+                                        .startsWith('국제생활관')
                                     ? const [1, 2, 3]
-                                    : const [2, 3, 4, 5, 6, 7])
+                                    : selectedWing == 'A'
+                                        ? const [1, 2, 3, 4, 5, 6, 7]
+                                        : const [2, 3, 4, 5, 6, 7])
                                 .map((f) => ComboBoxItem(value: f, child: Text('$f층')))
                                 .toList(),
                             onChanged: (v) => setDialogState(() {
@@ -976,6 +991,7 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                 final isDropdownRoomBuilding = selectedDormBuilding == '샬롬하우스' ||
                     selectedDormBuilding == '샬롬하우스(겨울방학)' ||
                     selectedDormBuilding == '국제생활관' ||
+                    selectedDormBuilding == '국제생활관(겨울방학)' ||
                     selectedDormBuilding == '바롬인성교육관';
                 final resolvedRoomNumber = isDropdownRoomBuilding
                     ? (selectedRoomNumber ?? '')
@@ -1094,7 +1110,8 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
   // 국제생활관: A동 1층 101~132, A동 2층 201~229, B동 2층 233~260, B동 3층 301~329
   List<String> _roomOptionsFor(String? dormBuilding, String? wing, int? floor) {
     if (dormBuilding == null || wing == null || floor == null) return [];
-    final isIntl = dormBuilding == '국제생활관';
+    // '국제생활관(겨울방학)' 도 같은 호실 번호 체계를 쓴다.
+    final isIntl = dormBuilding.startsWith('국제생활관');
     if (isIntl) {
       if (wing == 'A' && floor == 1) return List.generate(32, (i) => '${101 + i}');
       if (wing == 'A' && floor == 2) return List.generate(29, (i) => '${201 + i}');
@@ -1103,6 +1120,9 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
       return [];
     }
     // 샬롬하우스 / 샬롬하우스(겨울방학) 공통
+    // A동 1층은 107~109호만 존재하는 예외 구역이다.
+    if (wing == 'A' && floor == 1) return const ['107', '108', '109'];
+    // 그 외에는 A동 2~7층, B동 2~7층
     if (floor < 2 || floor > 7) return [];
     if (wing == 'A') return List.generate(20, (i) => '${floor * 100 + i + 1}');
     if (wing == 'B') return List.generate(15, (i) => '${floor * 100 + 21 + i}');
@@ -1165,7 +1185,9 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
     if (dormBuilding == '샬롬하우스' || dormBuilding == '샬롬하우스(겨울방학)') {
       return const Color(0xFF2196F3);
     }
-    if (dormBuilding == '국제생활관') return const Color(0xFF4CAF50);
+    if ((dormBuilding ?? '').startsWith('국제생활관')) {
+      return const Color(0xFF4CAF50);
+    }
     if (dormBuilding == '바롬인성교육관') return const Color(0xFFFF9800);
     return const Color(0xFF9E9E9E);
   }
@@ -1177,7 +1199,8 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
           if (_isMoveOutStatus(s.residentStatus)) return false;
           if (dorm != null && s.dormBuilding != dorm) return false;
           if (wing != null || floor != null) {
-            final isIntl = s.dormBuilding == '국제생활관';
+            // '국제생활관(겨울방학)' 도 같은 호실 번호 체계를 쓴다.
+            final isIntl = (s.dormBuilding ?? '').startsWith('국제생활관');
             final w = isIntl ? _getIntlWing(s.roomNumber) : _getBuilding(s.roomNumber);
             final f = isIntl ? _getIntlFloor(s.roomNumber) : _getFloor(s.roomNumber);
             if (wing != null && w != wing) return false;
@@ -1303,7 +1326,8 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
                 isSelected: isActive('샬롬하우스', 'A', null),
                 onTap: () => setFilter('샬롬하우스', 'A', null)),
             const SizedBox(width: 6),
-            for (int f = 2; f <= 7; f++) ...[
+            // A동은 1층부터 존재한다 (B동은 2층부터)
+            for (int f = 1; f <= 7; f++) ...[
               _buildStatChip(context, 'A동 $f층', countBy('샬롬하우스', 'A', f),
                   isSelected: isActive('샬롬하우스', 'A', f),
                   onTap: () => setFilter('샬롬하우스', 'A', f)),
@@ -1357,14 +1381,53 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
           const SizedBox(height: 8),
           // 샬롬하우스(겨울방학)
           scrollRow([
+            _buildStatChip(
+                context, '샬롬하우스 A동(겨울방학)',
+                countBy('샬롬하우스(겨울방학)', 'A', null),
+                isSelected: isActive('샬롬하우스(겨울방학)', 'A', null),
+                onTap: () => setFilter('샬롬하우스(겨울방학)', 'A', null)),
+            const SizedBox(width: 6),
             for (int f = 5; f <= 7; f++) ...[
               _buildStatChip(
-                  context, '샬롬하우스 A동 $f층(겨울방학)',
+                  context, 'A동 $f층',
                   countBy('샬롬하우스(겨울방학)', 'A', f),
                   isSelected: isActive('샬롬하우스(겨울방학)', 'A', f),
                   onTap: () => setFilter('샬롬하우스(겨울방학)', 'A', f)),
               if (f < 7) const SizedBox(width: 6),
             ],
+          ]),
+          const SizedBox(height: 8),
+          // 국제생활관(겨울방학)
+          scrollRow([
+            _buildStatChip(
+                context, '국생(겨울방학)',
+                countBy('국제생활관(겨울방학)', null, null),
+                isSelected: isActive('국제생활관(겨울방학)', null, null),
+                onTap: () => setFilter('국제생활관(겨울방학)', null, null)),
+            const SizedBox(width: 6),
+            _buildStatChip(
+                context, 'A동 1층',
+                countBy('국제생활관(겨울방학)', 'A', 1),
+                isSelected: isActive('국제생활관(겨울방학)', 'A', 1),
+                onTap: () => setFilter('국제생활관(겨울방학)', 'A', 1)),
+            const SizedBox(width: 6),
+            _buildStatChip(
+                context, 'A동 2층',
+                countBy('국제생활관(겨울방학)', 'A', 2),
+                isSelected: isActive('국제생활관(겨울방학)', 'A', 2),
+                onTap: () => setFilter('국제생활관(겨울방학)', 'A', 2)),
+            const SizedBox(width: 6),
+            _buildStatChip(
+                context, 'B동 2층',
+                countBy('국제생활관(겨울방학)', 'B', 2),
+                isSelected: isActive('국제생활관(겨울방학)', 'B', 2),
+                onTap: () => setFilter('국제생활관(겨울방학)', 'B', 2)),
+            const SizedBox(width: 6),
+            _buildStatChip(
+                context, 'B동 3층',
+                countBy('국제생활관(겨울방학)', 'B', 3),
+                isSelected: isActive('국제생활관(겨울방학)', 'B', 3),
+                onTap: () => setFilter('국제생활관(겨울방학)', 'B', 3)),
           ]),
         ],
       ),
@@ -1717,13 +1780,15 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
               if (dorm != _filterDormBuilding) return false;
             }
           }
+          // '국제생활관(겨울방학)' 도 같은 호실 번호 체계를 쓰므로 startsWith 로 판정한다.
+          // (통계 칩의 countBy 와 동일한 기준이어야 목록/개수가 어긋나지 않는다)
           if (_filterBuilding != null) {
-            final isIntl = dorm == '국제생활관';
+            final isIntl = (dorm ?? '').startsWith('국제생활관');
             final wing = isIntl ? _getIntlWing(room) : _getBuilding(room);
             if (wing != _filterBuilding) return false;
           }
           if (_filterFloor != null) {
-            final isIntl = dorm == '국제생활관';
+            final isIntl = (dorm ?? '').startsWith('국제생활관');
             final floor = isIntl ? _getIntlFloor(room) : _getFloor(room);
             if (floor != _filterFloor) return false;
           }
@@ -1743,7 +1808,13 @@ class _WindowsStudentsScreenState extends State<WindowsStudentsScreen> {
       ..sort((a, b) {
         // 가입자를 먼저, 그 다음 미가입자
         if (a.isRegistered != b.isRegistered) return a.isRegistered ? -1 : 1;
-        const buildingOrder = ['샬롬하우스', '국제생활관', '바롬인성교육관', '샬롬하우스(겨울방학)'];
+        const buildingOrder = [
+          '샬롬하우스',
+          '국제생활관',
+          '바롬인성교육관',
+          '샬롬하우스(겨울방학)',
+          '국제생활관(겨울방학)',
+        ];
         final aIdx = buildingOrder.indexOf(a.displayDormBuilding ?? '');
         final bIdx = buildingOrder.indexOf(b.displayDormBuilding ?? '');
         final aBuildingIdx = aIdx == -1 ? buildingOrder.length : aIdx;

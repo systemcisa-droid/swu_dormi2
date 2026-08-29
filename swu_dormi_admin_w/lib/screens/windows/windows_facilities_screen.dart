@@ -248,12 +248,22 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
     // 샬롬하우스: 저장된 building(A동/B동) + 방 번호에서 층 계산
     if (dormBuilding == '샬롬하우스' && roomNum != null && building.isNotEmpty) {
       final floor = roomNum ~/ 100;
-      if (floor >= 2 && floor <= 7) return '샬롬하우스 $building ${floor}층';
+      // A동 1층(107~109)은 예외 구역으로 존재한다.
+      if (floor >= 1 && floor <= 7) return '샬롬하우스 $building ${floor}층';
     }
 
     if (dormBuilding == '샬롬하우스(겨울방학)' && roomNum != null) {
       final floor = roomNum ~/ 100;
       if (floor >= 5 && floor <= 7) return '샬롬하우스(겨울방학) A동 ${floor}층';
+    }
+
+    // 국제생활관(겨울방학)은 국제생활관과 동일한 호실 번호 체계를 쓴다.
+    if (dormBuilding == '국제생활관(겨울방학)' && roomNum != null) {
+      if (roomNum >= 101 && roomNum <= 132) return '국제생활관(겨울방학) A동 1층';
+      if (roomNum >= 201 && roomNum <= 229) return '국제생활관(겨울방학) A동 2층';
+      if (roomNum >= 233 && roomNum <= 260) return '국제생활관(겨울방학) B동 2층';
+      if (roomNum >= 301 && roomNum <= 329) return '국제생활관(겨울방학) B동 3층';
+      return '';
     }
 
     return '';
@@ -392,8 +402,18 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
           const SizedBox(height: 8),
           // 샬롬하우스(겨울방학)
           scrollRow(withSep([
-            for (final f in kFloorOptions.where((f) => f.startsWith('샬롬하우스(겨울방학)')))
-              chip(f, f),
+            chip('샬롬하우스 A동(겨울방학)', '샬롬하우스(겨울방학) A동'),
+            for (final f in kFloorOptions
+                .where((f) => f.startsWith('샬롬하우스(겨울방학) A동')))
+              chip(f.replaceFirst('샬롬하우스(겨울방학) ', ''), f),
+          ])),
+          const SizedBox(height: 8),
+          // 국제생활관(겨울방학)
+          scrollRow(withSep([
+            chip('국생(겨울방학)', '국제생활관(겨울방학)'),
+            for (final f in kFloorOptions
+                .where((f) => f.startsWith('국제생활관(겨울방학)')))
+              chip(f.replaceFirst('국제생활관(겨울방학) ', ''), f),
           ])),
         ],
       ),

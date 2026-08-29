@@ -79,9 +79,13 @@ class _StudentsManagementScreenState extends State<StudentsManagementScreen> {
         return;
       }
 
-      final header = rows.first;
-      final excelRows =
-          rows.skip(1).map((row) => ExcelStudentRow.fromRow(header, row)).toList();
+      // 첫 줄이 제목 행일 수 있으므로 실제 헤더 행을 찾는다.
+      final headerIdx = ExcelStudentRow.findHeaderRowIndex(rows);
+      final header = rows[headerIdx];
+      final excelRows = rows
+          .skip(headerIdx + 1)
+          .map((row) => ExcelStudentRow.fromRow(header, row))
+          .toList();
 
       if (mounted) setState(() => _excelStudentRows = excelRows);
     } catch (_) {
@@ -135,6 +139,8 @@ class _StudentsManagementScreenState extends State<StudentsManagementScreen> {
       dorm = '샬롬하우스(겨울방학)';
     } else if (zone.startsWith('샬롬하우스')) {
       dorm = '샬롬하우스';
+    } else if (zone.startsWith('국제생활관(겨울방학)')) {
+      dorm = '국제생활관(겨울방학)';
     } else if (zone.startsWith('국제생활관')) {
       dorm = '국제생활관';
     } else if (zone.startsWith('바롬인성교육관')) {

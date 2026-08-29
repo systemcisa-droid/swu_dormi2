@@ -55,7 +55,9 @@ class _WindowsPointsStatisticsScreenState
           .get();
       final userInfo = <String, Map<String, String>>{};
       for (final doc in usersSnap.docs) {
-        final data = doc.data();
+        // 필드가 하나도 없는 문서는 data()가 null을 반환해 크래시하므로 건너뛴다.
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
         userInfo[doc.id] = {
           'name': (data['name'] ?? '').toString(),
           'studentId': (data['studentId'] ?? '').toString(),

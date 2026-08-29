@@ -128,7 +128,9 @@ class _RoomInspectionHistoryContentState
       final residentCountByRoom = <String, int>{};
       final residentsByRoom = <String, List<Map<String, String>>>{};
       for (final doc in usersSnap.docs) {
-        final data = doc.data();
+        // 필드가 하나도 없는 문서는 data()가 null을 반환해 크래시하므로 건너뛴다.
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
         final seatNumber = data['seatNumber']?.toString();
         if (seatNumber != null && seatNumber.isNotEmpty) {
           userSeatNumbers[doc.id] = seatNumber;
@@ -288,7 +290,10 @@ class _RoomInspectionHistoryContentState
       final vacantRoomKeys = <String>{};
       for (final floor in kFloorOptions) {
         final dorm = _buildingFromFloor(floor);
-        if (dorm != '샬롬하우스' && dorm != '국제생활관' && dorm != '샬롬하우스(겨울방학)') continue;
+        if (dorm != '샬롬하우스' &&
+            dorm != '국제생활관' &&
+            dorm != '샬롬하우스(겨울방학)' &&
+            dorm != '국제생활관(겨울방학)') continue;
         final wing = floor.contains('A동')
             ? 'A동'
             : floor.contains('B동')
@@ -300,7 +305,8 @@ class _RoomInspectionHistoryContentState
         final floorNum = int.parse(floorNumMatch.group(1)!);
 
         final List<int> roomNumbers;
-        if (dorm == '국제생활관') {
+        // '(겨울방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
+        if (dorm == '국제생활관' || dorm == '국제생활관(겨울방학)') {
           if (wing == 'A동' && floorNum == 1)
             roomNumbers = [for (var i = 101; i <= 132; i++) i];
           else if (wing == 'A동' && floorNum == 2)
@@ -315,6 +321,9 @@ class _RoomInspectionHistoryContentState
           // A동만 존재: 201~220, 301~320, 401~420
           final base = floorNum * 100;
           roomNumbers = [for (var i = base + 1; i <= base + 20; i++) i];
+        } else if (wing == 'A동' && floorNum == 1) {
+          // 샬롬하우스 A동 1층은 107~109호만 존재하는 예외 구역
+          roomNumbers = const [107, 108, 109];
         } else {
           final base = floorNum * 100;
           roomNumbers = wing == 'A동'
@@ -372,9 +381,10 @@ class _RoomInspectionHistoryContentState
       int buildingOrder(String key) {
         if (key.startsWith('샬롬하우스(겨울방학)')) return 3;
         if (key.startsWith('샬롬하우스')) return 0;
+        if (key.startsWith('국제생활관(겨울방학)')) return 4;
         if (key.startsWith('국제생활관')) return 1;
         if (key.startsWith('바롬인성교육관')) return 2;
-        return 4;
+        return 5;
       }
 
       final sortedRooms = grouped.keys.toList()
@@ -658,6 +668,13 @@ class _RoomInspectionHistoryContentState
       return '샬롬하우스(겨울방학) A동 ${floorNum}층';
     }
 
+    if (building == '국제생활관(겨울방학)') {
+      final wing = _computeBuilding(building, roomNum);
+      if (wing == null) return null;
+      final floorNum = roomNum ~/ 100;
+      return '국제생활관(겨울방학) $wing ${floorNum}층';
+    }
+
     if (building == '샬롬하우스') {
       final wing = _computeBuilding(building, roomNum);
       if (wing == null) return null;
@@ -693,7 +710,8 @@ class _RoomInspectionHistoryContentState
   // 국제생활관: 101~132, 201~229=A동 / 233~260, 301~329=B동
   // 샬롬하우스: 마지막 두자리 01~20=A동, 21~35=B동
   static String? _computeBuilding(String dormBuilding, int roomNum) {
-    if (dormBuilding == '국제생활관') {
+    // '국제생활관(겨울방학)' 도 같은 호실 번호 체계를 쓴다.
+    if (dormBuilding.startsWith('국제생활관')) {
       if ((roomNum >= 101 && roomNum <= 132) ||
           (roomNum >= 201 && roomNum <= 229))
         return 'A동';
@@ -715,6 +733,7 @@ class _RoomInspectionHistoryContentState
     if (floor == null || floor.isEmpty) return null;
     if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
+    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;
@@ -746,9 +765,14 @@ class _RoomInspectionHistoryContentState
         return _applyExcelStudentRows([]);
       }
 
-      final header = rows.first;
+      // 첫 줄이 제목 행일 수 있으므로 실제 헤더 행을 찾는다.
+      final headerIdx = ExcelStudentRow.findHeaderRowIndex(rows);
+      final header = rows[headerIdx];
       return _applyExcelStudentRows(
-        rows.skip(1).map((row) => ExcelStudentRow.fromRow(header, row)).toList(),
+        rows
+            .skip(headerIdx + 1)
+            .map((row) => ExcelStudentRow.fromRow(header, row))
+            .toList(),
       );
     } catch (_) {
       return _applyExcelStudentRows([]);

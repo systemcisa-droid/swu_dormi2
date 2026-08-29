@@ -520,6 +520,21 @@ class FirestoreService {
       }
 
       await batch.commit();
+
+      // 기기 푸시 알림 요청 (Cloud Function 이 읽어 FCM 으로 발송한다)
+      if (userIds.isNotEmpty) {
+        await _firestore.collection('notification_requests').add({
+          'type': type,
+          'title': title,
+          'body': content,
+          'userIds': userIds,
+          'target': 'users',
+          'data': {'type': type},
+          'createdAt': FieldValue.serverTimestamp(),
+          'status': 'pending',
+        });
+      }
+
       print('===== 알림 전송 완료 =====');
     } catch (e) {
       print('===== 알림 전송 오류 =====');

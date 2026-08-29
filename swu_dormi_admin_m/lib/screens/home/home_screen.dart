@@ -151,6 +151,8 @@ class _HomeScreenState extends State<HomeScreen> {
         dormBuilding = '샬롬하우스(겨울방학)';
       } else if (assignedFloor.startsWith('샬롬하우스')) {
         dormBuilding = '샬롬하우스';
+      } else if (assignedFloor.startsWith('국제생활관(겨울방학)')) {
+        dormBuilding = '국제생활관(겨울방학)';
       } else if (assignedFloor.startsWith('국제생활관')) {
         dormBuilding = '국제생활관';
       } else if (assignedFloor.startsWith('바롬인성교육관')) {
@@ -208,6 +210,8 @@ class _HomeScreenState extends State<HomeScreen> {
         dormBuilding = '샬롬하우스(겨울방학)';
       } else if (assignedFloor.startsWith('샬롬하우스')) {
         dormBuilding = '샬롬하우스';
+      } else if (assignedFloor.startsWith('국제생활관(겨울방학)')) {
+        dormBuilding = '국제생활관(겨울방학)';
       } else if (assignedFloor.startsWith('국제생활관')) {
         dormBuilding = '국제생활관';
       } else if (assignedFloor.startsWith('바롬인성교육관')) {
@@ -257,7 +261,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 .map((r) => r.map((c) => c?.value?.toString() ?? '').toList())
                 .toList();
             if (rows.length > 1) {
-              final header = rows.first;
+              // 첫 줄이 '2026학년도 2학기 학생정보' 같은 제목 행일 수 있으므로
+              // '학번/성명/이름'이 있는 행을 실제 헤더로 찾는다.
+              int headerIdx = rows.indexWhere((r) => r.any((h) {
+                    final n = h.replaceAll(RegExp(r'\s+'), '');
+                    return n.contains('학번') ||
+                        n.contains('성명') ||
+                        n.contains('이름');
+                  }));
+              if (headerIdx == -1) headerIdx = 0;
+              final header = rows[headerIdx];
               // 헤더에서 이메일·기숙사·호실 컬럼 인덱스 찾기
               final norm = header
                   .map((h) => h.replaceAll(RegExp(r'\s+'), '').toLowerCase())
@@ -273,15 +286,40 @@ class _HomeScreenState extends State<HomeScreen> {
               final dormIdx = findCol(['기숙사', '건물']);
               final roomIdx = findCol(['호실'], exclude: ['인실']);
 
-              for (final row in rows.skip(1)) {
+              for (final row in rows.skip(headerIdx + 1)) {
                 String cell(int idx) =>
                     (idx >= 0 && idx < row.length) ? row[idx].trim() : '';
 
-                // 해당 기숙사 + 해당 층 필터
+                // 해당 기숙사 + 해당 동 + 해당 층 필터
                 final rowDorm = cell(dormIdx);
                 final rowRoom = cell(roomIdx);
                 if (!rowDorm.contains(dormBuilding)) continue;
-                if ((int.tryParse(rowRoom) ?? 0) ~/ 100 != floorNum) continue;
+                final roomNum = int.tryParse(rowRoom) ?? 0;
+                if (roomNum ~/ 100 != floorNum) continue;
+                // 동(A동/B동) 판정
+                // 국제생활관은 호실 구간, 샬롬하우스는 끝 두 자리로 구분한다.
+                String rowWing;
+                if (dormBuilding.startsWith('국제생활관')) {
+                  if ((roomNum >= 101 && roomNum <= 132) ||
+                      (roomNum >= 201 && roomNum <= 229)) {
+                    rowWing = 'A동';
+                  } else if ((roomNum >= 233 && roomNum <= 260) ||
+                      (roomNum >= 301 && roomNum <= 329)) {
+                    rowWing = 'B동';
+                  } else {
+                    rowWing = '';
+                  }
+                } else {
+                  final last = roomNum % 100;
+                  if (last >= 1 && last <= 20) {
+                    rowWing = 'A동';
+                  } else if (last >= 21 && last <= 35) {
+                    rowWing = 'B동';
+                  } else {
+                    rowWing = '';
+                  }
+                }
+                if (rowWing != building) continue;
 
                 // 이메일이 가입자 목록에 없으면 미가입
                 final rowEmail = cell(emailIdx).toLowerCase();

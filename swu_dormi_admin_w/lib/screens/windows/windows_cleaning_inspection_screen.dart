@@ -11,6 +11,8 @@ import 'package:swu_dormi_admin/screens/windows/windows_cleaning_inspection_hist
 const String kDefaultFloorFilter = '샬롬하우스 A동 2층';
 
 const List<String> kFloorOptions = [
+  // A동 1층은 107~109호만 존재하는 예외 구역
+  '샬롬하우스 A동 1층',
   '샬롬하우스 A동 2층',
   '샬롬하우스 A동 3층',
   '샬롬하우스 A동 4층',
@@ -31,6 +33,10 @@ const List<String> kFloorOptions = [
   '샬롬하우스(겨울방학) A동 5층',
   '샬롬하우스(겨울방학) A동 6층',
   '샬롬하우스(겨울방학) A동 7층',
+  '국제생활관(겨울방학) A동 1층',
+  '국제생활관(겨울방학) A동 2층',
+  '국제생활관(겨울방학) B동 2층',
+  '국제생활관(겨울방학) B동 3층',
 ];
 
 // ──────────── 건물 색상 (파일 공통) ────────────

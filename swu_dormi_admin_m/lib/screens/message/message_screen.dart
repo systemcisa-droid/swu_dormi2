@@ -29,6 +29,8 @@ Future<String?> _getAssignedFloor() async {
     dormBuilding = '샬롬하우스(겨울방학)';
   } else if (assignedFloor.startsWith('샬롬하우스')) {
     dormBuilding = '샬롬하우스';
+  } else if (assignedFloor.startsWith('국제생활관(겨울방학)')) {
+    dormBuilding = '국제생활관(겨울방학)';
   } else if (assignedFloor.startsWith('국제생활관')) {
     dormBuilding = '국제생활관';
   } else if (assignedFloor.startsWith('바롬인성교육관')) {

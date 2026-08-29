@@ -220,6 +220,29 @@ class _FacilitiesManagementScreenState
   }
 }
 
+/// 기숙사 건물과 호실 번호로 동(A동/B동)을 계산한다.
+///
+/// 국제생활관은 호실 번호만으로 동이 정해지므로 저장된 building 값이
+/// '미배정'이어도 여기서 올바른 동을 구할 수 있다.
+/// '(겨울방학)' 은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 동일하다.
+String? _wingFromRoom(String dormBuilding, String roomNumber) {
+  final room = int.tryParse(roomNumber) ?? 0;
+  if (room == 0) return null;
+
+  if (dormBuilding.startsWith('국제생활관')) {
+    if ((room >= 101 && room <= 132) || (room >= 201 && room <= 229)) return 'A동';
+    if ((room >= 233 && room <= 260) || (room >= 301 && room <= 329)) return 'B동';
+    return null;
+  }
+  if (dormBuilding.startsWith('샬롬하우스')) {
+    final roomInFloor = room % 100;
+    if (roomInFloor >= 1 && roomInFloor <= 20) return 'A동';
+    if (roomInFloor >= 21 && roomInFloor <= 35) return 'B동';
+    return null;
+  }
+  return null;
+}
+
 String? _floorFromReport(FacilityReportModel report, Map<String, String> dormBuildingMap) {
   final building = (report.dormBuilding?.isNotEmpty == true)
       ? report.dormBuilding!
@@ -227,16 +250,16 @@ String? _floorFromReport(FacilityReportModel report, Map<String, String> dormBui
   final room = int.tryParse(report.roomNumber) ?? 0;
   if (room == 0 || building.isEmpty) return null;
 
-  if (building == '샬롬하우스') {
+  if (building == '샬롬하우스' || building == '샬롬하우스(겨울방학)') {
     final floorNum = room ~/ 100;
     final roomInFloor = room % 100;
-    if (roomInFloor >= 1 && roomInFloor <= 20) return '샬롬하우스 A동 $floorNum층';
-    if (roomInFloor >= 21 && roomInFloor <= 35) return '샬롬하우스 B동 $floorNum층';
-  } else if (building == '국제생활관') {
-    if (room >= 101 && room <= 132) return '국제생활관 A동 1층';
-    if (room >= 201 && room <= 229) return '국제생활관 A동 2층';
-    if (room >= 233 && room <= 260) return '국제생활관 B동 2층';
-    if (room >= 301 && room <= 329) return '국제생활관 B동 3층';
+    if (roomInFloor >= 1 && roomInFloor <= 20) return '$building A동 $floorNum층';
+    if (roomInFloor >= 21 && roomInFloor <= 35) return '$building B동 $floorNum층';
+  } else if (building == '국제생활관' || building == '국제생활관(겨울방학)') {
+    if (room >= 101 && room <= 132) return '$building A동 1층';
+    if (room >= 201 && room <= 229) return '$building A동 2층';
+    if (room >= 233 && room <= 260) return '$building B동 2층';
+    if (room >= 301 && room <= 329) return '$building B동 3층';
   } else if (building == '바롬인성교육관') {
     final floorNum = room ~/ 100;
     return '바롬인성교육관 $floorNum층';
@@ -709,13 +732,21 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
                           ? report.dormBuilding!
                           : (widget.dormBuildingMap[report.userId] ?? '');
                       if (dorm.isEmpty) return const SizedBox.shrink();
+                      // 저장된 building 값이 '미배정' 등으로 부정확할 수 있으므로
+                      // 호실 번호로 동을 계산해 우선 사용한다.
+                      final wing = _wingFromRoom(dorm, report.roomNumber) ??
+                          (report.building?.isNotEmpty == true
+                              ? report.building!
+                              : '');
                       return Column(
                         children: [
                           Row(
                             children: [
                               Expanded(child: _detailRow(Icons.home_work, '기숙사', dorm)),
-                              if (report.building != null && report.building!.isNotEmpty)
-                                Expanded(child: _detailRow(Icons.apartment, '구역', report.building!)),
+                              if (wing.isNotEmpty)
+                                Expanded(
+                                    child: _detailRow(
+                                        Icons.apartment, '구역', wing)),
                             ],
                           ),
                           const SizedBox(height: 12),

@@ -154,6 +154,7 @@ class _CleaningInspectionContentState extends State<CleaningInspectionContent> {
   static String? _extractBuildingFromFloor(String floor) {
     if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
+    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;

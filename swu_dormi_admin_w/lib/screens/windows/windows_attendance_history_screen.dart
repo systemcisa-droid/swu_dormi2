@@ -69,7 +69,9 @@ class _WindowsAttendanceHistoryScreenState
       // 전체 학생 기준으로 key를 먼저 만든다 (기록 유무와 무관하게 항상 표시)
       final studentInfo = <String, Map<String, dynamic>>{};
       for (final doc in usersSnap.docs) {
-        final data = doc.data();
+        // 필드가 하나도 없는 문서는 data()가 null을 반환해 크래시하므로 건너뛴다.
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
         final room = (data['roomNumber'] as String?) ?? '';
         if (room.isEmpty || room == '000') continue;
         final dorm = (data['dormBuilding'] as String?) ?? '';
