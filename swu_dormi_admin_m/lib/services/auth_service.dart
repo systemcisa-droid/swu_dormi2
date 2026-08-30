@@ -43,7 +43,9 @@ class AuthService {
           errorMessage = '사용자를 찾을 수 없습니다.';
           break;
         case 'wrong-password':
-          errorMessage = '비밀번호가 올바르지 않습니다.';
+        // 최신 Firebase 는 비밀번호 오류에도 invalid-credential 을 반환한다.
+        case 'invalid-credential':
+          errorMessage = '비밀번호를 확인해주세요';
           break;
         case 'invalid-email':
           errorMessage = '유효하지 않은 이메일 주소입니다.';

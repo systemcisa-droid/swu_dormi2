@@ -384,6 +384,9 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
   /// 안 읽은 사람 수 = 참여자 수 - readBy 길이
   int _memberCount = 0;
 
+  /// 채팅방에 있는 학생 이름 목록 (상단에 표시)
+  List<String> _memberNames = [];
+
   @override
   void initState() {
     super.initState();
@@ -407,11 +410,17 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
           .where('dormBuilding', isEqualTo: dormBuilding)
           .where('roomNumber', isEqualTo: roomNumber)
           .get();
-      final students = studentsSnap.docs.where((d) {
+      final studentDocs = studentsSnap.docs.where((d) {
         final data = d.data();
         if ((data['role'] as String?) != 'student') return false;
         return ((data['residentStatus'] as String?) ?? '재실중') == '재실중';
-      }).length;
+      }).toList();
+      final students = studentDocs.length;
+      final names = studentDocs
+          .map((d) => (d.data()['name'] as String?)?.trim() ?? '')
+          .where((n) => n.isNotEmpty)
+          .toList()
+        ..sort();
 
       final floorNum = (int.tryParse(roomNumber) ?? 0) ~/ 100;
       final captainsSnap = await _firestore
@@ -421,7 +430,10 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
           .get();
 
       if (mounted) {
-        setState(() => _memberCount = students + captainsSnap.docs.length);
+        setState(() {
+          _memberCount = students + captainsSnap.docs.length;
+          _memberNames = names;
+        });
       }
     } catch (e) {
       debugPrint('참여자 수 조회 오류: $e');
@@ -655,6 +667,30 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
               ],
             ),
           ),
+          // 채팅방에 있는 학생 이름
+          if (_memberNames.isNotEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                border: Border(bottom: BorderSide(color: Colors.grey.shade200)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.people_outline,
+                      size: 14, color: Colors.grey.shade600),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _memberNames.join(', '),
+                      style: TextStyle(
+                          fontSize: 12, color: Colors.grey.shade700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(child: _buildMessageList(myUid)),
           _buildInputBar(),
         ],

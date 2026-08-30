@@ -20,6 +20,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = true;
 
   static const List<String> _floorOptions = [
+    // A동 1층은 107~109호만 존재하는 예외 구역
+    '샬롬하우스 A동 1층',
     '샬롬하우스 A동 2층',
     '샬롬하우스 A동 3층',
     '샬롬하우스 A동 4층',
