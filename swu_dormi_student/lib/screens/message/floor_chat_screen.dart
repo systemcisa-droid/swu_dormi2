@@ -62,6 +62,10 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
   final _uploadingNotifier = ValueNotifier<String?>(null);
   int _prevDocCount = 0;
 
+  /// 채팅방 참여자 수 (해당 호실 학생 + 담당 층장)
+  /// 안 읽은 사람 수 = 참여자 수 - readBy 길이
+  int _memberCount = 0;
+
   /// 현재 언어 설정에 맞는 문자열
   FloorChatStrings get _s => FloorChatStrings(
       Provider.of<LocaleProvider>(context, listen: false).isEnglish);
@@ -79,6 +83,46 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     final roomId = buildRoomId(user.dormBuilding, user.building, user.roomNumber);
     if (roomId == null) return;
     _markAllRead(roomId, user.uid);
+    _loadMemberCount(user);
+  }
+
+  /// 채팅방 참여자 수를 구한다. (해당 호실 재실 학생 + 담당 층장)
+  /// 안 읽은 사람 수 계산의 기준이 되며, 알림 발송 대상과 같은 규칙이다.
+  Future<void> _loadMemberCount(dynamic user) async {
+    final dormBuilding = (user.dormBuilding as String?) ?? '';
+    final roomNumber = (user.roomNumber as String?) ?? '';
+    if (dormBuilding.isEmpty || roomNumber.isEmpty) return;
+
+    try {
+      final studentsSnap = await _firestore
+          .collection('users')
+          .where('dormBuilding', isEqualTo: dormBuilding)
+          .where('roomNumber', isEqualTo: roomNumber)
+          .get();
+      final students = studentsSnap.docs.where((d) {
+        final data = d.data();
+        if ((data['role'] as String?) != 'student') return false;
+        return ((data['residentStatus'] as String?) ?? '재실중') == '재실중';
+      }).length;
+
+      // 담당 층장 (assignedFloor 예: '샬롬하우스 A동 3층')
+      final wing = _wingFromRoom(dormBuilding, roomNumber);
+      int captains = 0;
+      if (wing != null) {
+        final floorNum = (int.tryParse(roomNumber) ?? 0) ~/ 100;
+        final captainsSnap = await _firestore
+            .collection('users')
+            .where('role', isEqualTo: 'admin_m')
+            .where('assignedFloor',
+                isEqualTo: '$dormBuilding $wing $floorNum층')
+            .get();
+        captains = captainsSnap.docs.length;
+      }
+
+      if (mounted) setState(() => _memberCount = students + captains);
+    } catch (e) {
+      debugPrint('참여자 수 조회 오류: $e');
+    }
   }
 
   @override
@@ -388,25 +432,33 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
           );
         }
 
-        // 새 메시지가 추가됐을 때만 스크롤
+        // 새 메시지가 오면 맨 아래(reverse 기준 offset 0)로 이동한다.
         if (docs.length > _prevDocCount) {
+          final isFirstLoad = _prevDocCount == 0;
           _prevDocCount = docs.length;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollCtrl.hasClients) {
+          if (!isFirstLoad) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!_scrollCtrl.hasClients) return;
               _scrollCtrl.animateTo(
-                _scrollCtrl.position.maxScrollExtent,
+                0,
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOut,
               );
-            }
-          });
+            });
+          }
         }
 
+        // reverse: true 로 아래에서 위로 쌓아 항상 최신 메시지가 먼저 보이게 한다.
+        // (ListView.builder 는 지연 렌더링이라 첫 프레임에 전체 높이를 알 수 없어
+        //  maxScrollExtent 로 맨 아래로 보내는 방식은 정확히 동작하지 않는다)
         return ListView.builder(
           controller: _scrollCtrl,
+          reverse: true,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           itemCount: docs.length,
-          itemBuilder: (context, index) {
+          itemBuilder: (context, reverseIndex) {
+            // reverse 목록이므로 실제 순서로 되돌린다.
+            final index = docs.length - 1 - reverseIndex;
             final data = docs[index].data() as Map<String, dynamic>;
             final isMine = (data['senderId'] as String?) == myUid;
             final senderName = data['senderName'] as String? ?? '';
@@ -414,6 +466,11 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
             final text = data['text'] as String? ?? '';
             final mediaUrl = data['mediaUrl'] as String?;
             final mediaType = data['mediaType'] as String?;
+            // 안 읽은 사람 수 = 참여자 수 - 읽은 사람 수
+            final readBy = (data['readBy'] as List<dynamic>?) ?? const [];
+            final unreadCount = _memberCount > 0
+                ? (_memberCount - readBy.length).clamp(0, _memberCount)
+                : 0;
             final ts = data['createdAt'] as Timestamp?;
             final time = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '';
 
@@ -433,6 +490,37 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
               }
             }
 
+            // 같은 사람이 연속으로 보낸 메시지는 아바타·이름을 반복하지 않는다.
+            // (날짜 구분선이 들어가면 그 아래는 다시 첫 메시지로 취급)
+            final senderId = data['senderId'] as String?;
+            final prevData = index > 0
+                ? docs[index - 1].data() as Map<String, dynamic>
+                : null;
+            // 분이 다르면 다른 시각의 메시지이므로 별개 묶음으로 본다.
+            bool sameMinute(Timestamp? a, Timestamp? b) {
+              if (a == null || b == null) return false;
+              final x = a.toDate();
+              final y = b.toDate();
+              return x.year == y.year &&
+                  x.month == y.month &&
+                  x.day == y.day &&
+                  x.hour == y.hour &&
+                  x.minute == y.minute;
+            }
+
+            final isFirstOfGroup = dateDivider != null ||
+                prevData == null ||
+                (prevData['senderId'] as String?) != senderId ||
+                !sameMinute(prevData['createdAt'] as Timestamp?, ts);
+
+            // 시간은 그룹의 마지막 메시지에만 표시한다.
+            final nextData = index < docs.length - 1
+                ? docs[index + 1].data() as Map<String, dynamic>
+                : null;
+            final isLastOfGroup = nextData == null ||
+                (nextData['senderId'] as String?) != senderId ||
+                !sameMinute(nextData['createdAt'] as Timestamp?, ts);
+
             return Column(
               children: [
                 if (dateDivider != null) _buildDateDivider(dateDivider),
@@ -441,9 +529,11 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                   senderName: senderName,
                   roomNumber: roomNumber,
                   text: text,
-                  time: time,
+                  time: isLastOfGroup ? time : '',
+                  isFirstOfGroup: isFirstOfGroup,
                   mediaUrl: mediaUrl,
                   mediaType: mediaType,
+                  unreadCount: unreadCount,
                 ),
               ],
             );
@@ -475,8 +565,10 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     required String roomNumber,
     required String text,
     required String time,
+    bool isFirstOfGroup = true,
     String? mediaUrl,
     String? mediaType,
+    int unreadCount = 0,
   }) {
     final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
     final bubbleColor = isMine ? Colors.cyan.shade500 : Colors.white;
@@ -484,33 +576,65 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     final nameLabel = _s.senderLabel(senderName, roomNumber);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      // 연속 메시지는 위 간격을 좁혀 한 덩어리로 보이게 한다.
+      padding: EdgeInsets.only(bottom: 2, top: isFirstOfGroup ? 8 : 0),
       child: Row(
         mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!isMine) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.cyan.shade100,
-              child: Icon(Icons.person, size: 18, color: Colors.cyan.shade700),
-            ),
-            const SizedBox(width: 8),
-          ],
           Column(
             crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              if (!isMine)
+              // 아바타는 이름 옆(같은 줄)에 표시하고, 연속 메시지에서는 둘 다 생략한다.
+              if (!isMine && isFirstOfGroup)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(nameLabel,
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // 층장은 연한 녹색, 같은 호실 학생은 하늘색으로 구분한다.
+                      CircleAvatar(
+                        radius: 16.5,
+                        backgroundColor: roomNumber == '층장'
+                            ? Colors.green.shade100
+                            : Colors.cyan.shade100,
+                        child: Icon(Icons.person,
+                            size: 20,
+                            color: roomNumber == '층장'
+                                ? Colors.green.shade700
+                                : Colors.cyan.shade700),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(nameLabel,
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
                 ),
-              Row(
+              // 말풍선은 아바타 오른쪽 라인에 맞춘다. (아바타 33 + 간격 6)
+              Padding(
+                padding: EdgeInsets.only(left: isMine ? 0 : 39),
+                child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   if (isMine) ...[
-                    Text(time, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (unreadCount > 0)
+                          Text('$unreadCount',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.amber.shade700,
+                                  fontWeight: FontWeight.bold)),
+                        Text(time,
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey.shade500)),
+                      ],
+                    ),
                     const SizedBox(width: 6),
                   ],
                   ConstrainedBox(
@@ -553,9 +677,24 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                   ),
                   if (!isMine) ...[
                     const SizedBox(width: 6),
-                    Text(time, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (unreadCount > 0)
+                          Text('$unreadCount',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.amber.shade700,
+                                  fontWeight: FontWeight.bold)),
+                        Text(time,
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey.shade500)),
+                      ],
+                    ),
                   ],
                 ],
+                ),
               ),
             ],
           ),

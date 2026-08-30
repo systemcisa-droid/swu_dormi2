@@ -380,10 +380,52 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
   final _uploadingNotifier = ValueNotifier<String?>(null);
   int _prevDocCount = 0;
 
+  /// 채팅방 참여자 수 (해당 호실 학생 + 담당 층장)
+  /// 안 읽은 사람 수 = 참여자 수 - readBy 길이
+  int _memberCount = 0;
+
   @override
   void initState() {
     super.initState();
     _markAllRead();
+    _loadMemberCount();
+  }
+
+  /// 채팅방 참여자 수를 구한다. (학생앱과 동일한 규칙)
+  Future<void> _loadMemberCount() async {
+    // roomId 예: '샬롬하우스_A동_320호'
+    final parts = widget.roomId.split('_');
+    if (parts.length < 3) return;
+    final dormBuilding = parts[0];
+    final wing = parts[1];
+    final roomNumber = RegExp(r'\d+').firstMatch(parts[2])?.group(0) ?? '';
+    if (roomNumber.isEmpty) return;
+
+    try {
+      final studentsSnap = await _firestore
+          .collection('users')
+          .where('dormBuilding', isEqualTo: dormBuilding)
+          .where('roomNumber', isEqualTo: roomNumber)
+          .get();
+      final students = studentsSnap.docs.where((d) {
+        final data = d.data();
+        if ((data['role'] as String?) != 'student') return false;
+        return ((data['residentStatus'] as String?) ?? '재실중') == '재실중';
+      }).length;
+
+      final floorNum = (int.tryParse(roomNumber) ?? 0) ~/ 100;
+      final captainsSnap = await _firestore
+          .collection('users')
+          .where('role', isEqualTo: 'admin_m')
+          .where('assignedFloor', isEqualTo: '$dormBuilding $wing $floorNum층')
+          .get();
+
+      if (mounted) {
+        setState(() => _memberCount = students + captainsSnap.docs.length);
+      }
+    } catch (e) {
+      debugPrint('참여자 수 조회 오류: $e');
+    }
   }
 
   @override
@@ -649,24 +691,33 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
         }
 
         // 새 메시지가 추가됐을 때만 스크롤 (rebuild마다 스크롤하면 깜빡임 발생)
+        // 새 메시지가 오면 맨 아래(reverse 기준 offset 0)로 이동한다.
         if (docs.length > _prevDocCount) {
+          final isFirstLoad = _prevDocCount == 0;
           _prevDocCount = docs.length;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (_scrollCtrl.hasClients) {
+          if (!isFirstLoad) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!_scrollCtrl.hasClients) return;
               _scrollCtrl.animateTo(
-                _scrollCtrl.position.maxScrollExtent,
+                0,
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeOut,
               );
-            }
-          });
+            });
+          }
         }
 
+        // reverse: true 로 아래에서 위로 쌓아 항상 최신 메시지가 먼저 보이게 한다.
+        // (ListView.builder 는 지연 렌더링이라 첫 프레임에 전체 높이를 알 수 없어
+        //  maxScrollExtent 로 맨 아래로 보내는 방식은 정확히 동작하지 않는다)
         return ListView.builder(
           controller: _scrollCtrl,
+          reverse: true,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           itemCount: docs.length,
-          itemBuilder: (context, index) {
+          itemBuilder: (context, reverseIndex) {
+            // reverse 목록이므로 실제 순서로 되돌린다.
+            final index = docs.length - 1 - reverseIndex;
             final data = docs[index].data() as Map<String, dynamic>;
             final isMine = (data['senderId'] as String?) == myUid;
             final senderName = data['senderName'] as String? ?? '';
@@ -674,6 +725,11 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             final text = data['text'] as String? ?? '';
             final mediaUrl = data['mediaUrl'] as String?;
             final mediaType = data['mediaType'] as String?;
+            // 안 읽은 사람 수 = 참여자 수 - 읽은 사람 수
+            final readBy = (data['readBy'] as List<dynamic>?) ?? const [];
+            final unreadCount = _memberCount > 0
+                ? (_memberCount - readBy.length).clamp(0, _memberCount)
+                : 0;
             final ts = data['createdAt'] as Timestamp?;
             final time = ts != null ? DateFormat('HH:mm').format(ts.toDate()) : '';
 
@@ -691,6 +747,37 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
               }
             }
 
+            // 같은 사람이 연속으로 보낸 메시지는 아바타·이름을 반복하지 않는다.
+            // (날짜 구분선이 들어가면 그 아래는 다시 첫 메시지로 취급)
+            final senderId = data['senderId'] as String?;
+            final prevData = index > 0
+                ? docs[index - 1].data() as Map<String, dynamic>
+                : null;
+            // 분이 다르면 다른 시각의 메시지이므로 별개 묶음으로 본다.
+            bool sameMinute(Timestamp? a, Timestamp? b) {
+              if (a == null || b == null) return false;
+              final x = a.toDate();
+              final y = b.toDate();
+              return x.year == y.year &&
+                  x.month == y.month &&
+                  x.day == y.day &&
+                  x.hour == y.hour &&
+                  x.minute == y.minute;
+            }
+
+            final isFirstOfGroup = dateDivider != null ||
+                prevData == null ||
+                (prevData['senderId'] as String?) != senderId ||
+                !sameMinute(prevData['createdAt'] as Timestamp?, ts);
+
+            // 시간은 그룹의 마지막 메시지에만 표시한다.
+            final nextData = index < docs.length - 1
+                ? docs[index + 1].data() as Map<String, dynamic>
+                : null;
+            final isLastOfGroup = nextData == null ||
+                (nextData['senderId'] as String?) != senderId ||
+                !sameMinute(nextData['createdAt'] as Timestamp?, ts);
+
             return Column(
               children: [
                 if (dateDivider != null) _buildDateDivider(dateDivider),
@@ -699,9 +786,11 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                   senderName: senderName,
                   roomNumber: roomNumber,
                   text: text,
-                  time: time,
+                  time: isLastOfGroup ? time : '',
+                  isFirstOfGroup: isFirstOfGroup,
                   mediaUrl: mediaUrl,
                   mediaType: mediaType,
+                  unreadCount: unreadCount,
                 ),
               ],
             );
@@ -733,8 +822,10 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     required String roomNumber,
     required String text,
     required String time,
+    bool isFirstOfGroup = true,
     String? mediaUrl,
     String? mediaType,
+    int unreadCount = 0,
   }) {
     final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
     final bubbleColor = isMine ? Colors.cyan.shade500 : Colors.white;
@@ -742,36 +833,59 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     final nameLabel = roomNumber == '층장' ? '$senderName (층장)' : '$senderName ($roomNumber호)';
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      // 연속 메시지는 위 간격을 좁혀 한 덩어리로 보이게 한다.
+      padding: EdgeInsets.only(bottom: 2, top: isFirstOfGroup ? 8 : 0),
       child: Row(
         mainAxisAlignment: isMine ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (!isMine) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: Colors.orange.shade100,
-              child: Icon(Icons.person, size: 18, color: Colors.orange.shade700),
-            ),
-            const SizedBox(width: 8),
-          ],
           Column(
             crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              if (!isMine)
+              // 아바타는 이름 옆(같은 줄)에 표시하고, 연속 메시지에서는 둘 다 생략한다.
+              if (!isMine && isFirstOfGroup)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(nameLabel,
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: Colors.grey.shade600,
-                          fontWeight: FontWeight.w600)),
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircleAvatar(
+                        radius: 16.5,
+                        backgroundColor: Colors.orange.shade100,
+                        child: Icon(Icons.person,
+                            size: 20, color: Colors.orange.shade700),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(nameLabel,
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w600)),
+                    ],
+                  ),
                 ),
-              Row(
+              // 말풍선은 아바타 오른쪽 라인에 맞춘다. (아바타 33 + 간격 6)
+              Padding(
+                padding: EdgeInsets.only(left: isMine ? 0 : 39),
+                child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   if (isMine) ...[
-                    Text(time, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (unreadCount > 0)
+                          Text('$unreadCount',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.amber.shade700,
+                                  fontWeight: FontWeight.bold)),
+                        Text(time,
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey.shade500)),
+                      ],
+                    ),
                     const SizedBox(width: 6),
                   ],
                   ConstrainedBox(
@@ -814,9 +928,24 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                   ),
                   if (!isMine) ...[
                     const SizedBox(width: 6),
-                    Text(time, style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (unreadCount > 0)
+                          Text('$unreadCount',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.amber.shade700,
+                                  fontWeight: FontWeight.bold)),
+                        Text(time,
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey.shade500)),
+                      ],
+                    ),
                   ],
                 ],
+                ),
               ),
             ],
           ),
