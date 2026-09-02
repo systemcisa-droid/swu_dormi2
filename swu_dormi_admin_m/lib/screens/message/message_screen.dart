@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../services/auth_service.dart';
 import 'chat_media.dart';
 import 'chat_upload.dart';
 // captainFloor: "샬롬하우스 A동 3층"
@@ -380,6 +381,9 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
   final _uploadingNotifier = ValueNotifier<String?>(null);
   int _prevDocCount = 0;
 
+  /// 내가 차단한 사용자 uid 목록. 이 사용자들의 메시지는 표시하지 않는다.
+  List<String> _blockedUsers = [];
+
   /// 채팅방 참여자 수 (해당 호실 학생 + 담당 층장)
   /// 안 읽은 사람 수 = 참여자 수 - readBy 길이
   int _memberCount = 0;
@@ -392,9 +396,267 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     super.initState();
     _markAllRead();
     _loadMemberCount();
+    _loadBlockedUsers();
   }
 
   /// 채팅방 참여자 수를 구한다. (학생앱과 동일한 규칙)
+  /// 내가 차단한 사용자 목록을 불러온다.
+  Future<void> _loadBlockedUsers() async {
+    try {
+      final list = await AuthService().getBlockedUsers();
+      if (!mounted) return;
+      setState(() => _blockedUsers = list);
+    } catch (_) {
+      // 실패해도 채팅은 정상 동작해야 하므로 무시한다.
+    }
+  }
+
+  /// 타인의 메시지를 길게 누르면 나오는 신고/차단 메뉴.
+  /// App Store 가이드라인 1.2 요구사항(신고·차단 수단)을 충족한다.
+  Future<void> _showModerationSheet({
+    required String messageId,
+    required String senderId,
+    required String senderName,
+    required String text,
+  }) async {
+    final isBlocked = _blockedUsers.contains(senderId);
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Row(
+                children: [
+                  Icon(Icons.shield_outlined,
+                      size: 18, color: Colors.grey.shade600),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      senderName.isEmpty ? '메시지 신고 및 차단' : senderName,
+                      style: const TextStyle(
+                          fontSize: 15, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined, color: Colors.red),
+              title: const Text('신고하기'),
+              subtitle: const Text('부적절한 메시지를 운영자에게 신고합니다',
+                  style: TextStyle(fontSize: 12)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showReportDialog(
+                  messageId: messageId,
+                  targetAuthorId: senderId,
+                  text: text,
+                );
+              },
+            ),
+            ListTile(
+              leading: Icon(isBlocked ? Icons.person_add_alt : Icons.block,
+                  color: isBlocked ? Colors.blue : Colors.red),
+              title: Text(isBlocked ? '차단 해제' : '이 사용자 차단'),
+              subtitle: Text(
+                isBlocked
+                    ? '차단을 해제하면 메시지가 다시 표시됩니다'
+                    : '차단하면 이 사용자의 메시지가 즉시 보이지 않습니다',
+                style: const TextStyle(fontSize: 12),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _toggleBlock(senderId, senderName, isBlocked);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 신고 사유를 선택받아 reports 컬렉션에 기록한다.
+  /// 운영자는 관리자 프로그램의 신고 관리 페이지에서 24시간 내 처리한다.
+  Future<void> _showReportDialog({
+    required String messageId,
+    required String targetAuthorId,
+    required String text,
+  }) async {
+    const reasons = ['비방·욕설', '허위 사실 유포', '음란·불건전 내용', '개인정보 침해', '기타'];
+    String? selected;
+    final etcCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('메시지 신고'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('신고 사유를 선택해주세요.',
+                    style: TextStyle(fontSize: 13)),
+                const SizedBox(height: 12),
+                for (final r in reasons)
+                  GestureDetector(
+                    onTap: () => setDialogState(() => selected = r),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Icon(
+                            selected == r
+                                ? Icons.check_circle
+                                : Icons.circle_outlined,
+                            size: 20,
+                            color: selected == r
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.grey,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(r, style: const TextStyle(fontSize: 14)),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (selected == '기타') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: etcCtrl,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      hintText: '신고 사유를 입력해주세요',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogCtx, false),
+                child: const Text('취소')),
+            TextButton(
+              onPressed: selected == null
+                  ? null
+                  : () => Navigator.pop(dialogCtx, true),
+              child: const Text('신고', style: TextStyle(color: Colors.red)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || selected == null) {
+      etcCtrl.dispose();
+      return;
+    }
+
+    try {
+      await _firestore.collection('reports').add({
+        'reporterId': FirebaseAuth.instance.currentUser?.uid ?? '',
+        'targetId': messageId,
+        'targetType': 'chat_message',
+        'targetAuthorId': targetAuthorId,
+        'targetContent': text,
+        'roomId': widget.roomId,
+        'reason': selected,
+        'detail': selected == '기타' ? etcCtrl.text.trim() : '',
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('신고가 접수되었습니다. 24시간 이내에 검토 후 조치됩니다.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('신고 접수에 실패했습니다: $e')),
+        );
+      }
+    } finally {
+      etcCtrl.dispose();
+    }
+  }
+
+  /// 사용자 차단 / 차단 해제.
+  /// 차단 시 운영자에게도 알려 부적절한 콘텐츠를 확인할 수 있게 한다.
+  Future<void> _toggleBlock(
+      String targetUid, String targetName, bool isBlocked) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(isBlocked ? '차단 해제' : '사용자 차단'),
+        content: Text(
+          isBlocked
+              ? '차단을 해제하시겠습니까?\n이 사용자의 메시지가 다시 표시됩니다.'
+              : '이 사용자를 차단하시겠습니까?\n차단하면 해당 사용자의 메시지가 즉시 보이지 않으며, '
+                  '운영자에게도 통보되어 검토가 이루어집니다.',
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(isBlocked ? '차단 해제' : '차단',
+                style: const TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final auth = AuthService();
+      if (isBlocked) {
+        await auth.unblockUser(targetUid);
+      } else {
+        await auth.blockUser(targetUid);
+        // 차단 사실을 운영자에게 알린다 (가이드라인 1.2).
+        await _firestore.collection('reports').add({
+          'reporterId': FirebaseAuth.instance.currentUser?.uid ?? '',
+          'targetId': targetUid,
+          'targetType': 'user_block',
+          'targetAuthorId': targetUid,
+          'roomId': widget.roomId,
+          'reason': '사용자 차단',
+          'detail': '$targetName 사용자를 차단했습니다.',
+          'status': 'pending',
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await _loadBlockedUsers();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(isBlocked ? '차단을 해제했습니다.' : '사용자를 차단했습니다.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('처리에 실패했습니다: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _loadMemberCount() async {
     // roomId 예: '샬롬하우스_A동_320호'
     final parts = widget.roomId.split('_');
@@ -710,7 +972,12 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        final docs = snapshot.data?.docs ?? [];
+        // 차단한 사용자의 메시지는 즉시 목록에서 제외한다 (가이드라인 1.2).
+        final docs = (snapshot.data?.docs ?? []).where((d) {
+          final data = d.data() as Map<String, dynamic>?;
+          final sid = (data?['senderId'] ?? '').toString();
+          return !_blockedUsers.contains(sid);
+        }).toList();
         if (docs.isEmpty) {
           return Center(
             child: Column(
@@ -817,16 +1084,36 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             return Column(
               children: [
                 if (dateDivider != null) _buildDateDivider(dateDivider),
-                _buildBubble(
-                  isMine: isMine,
-                  senderName: senderName,
-                  roomNumber: roomNumber,
-                  text: text,
-                  time: isLastOfGroup ? time : '',
-                  isFirstOfGroup: isFirstOfGroup,
-                  mediaUrl: mediaUrl,
-                  mediaType: mediaType,
-                  unreadCount: unreadCount,
+                GestureDetector(
+                  // 타인의 메시지를 길게 눌러도 신고/차단 메뉴가 열린다.
+                  onLongPress: isMine || senderId == null
+                      ? null
+                      : () => _showModerationSheet(
+                            messageId: docs[index].id,
+                            senderId: senderId,
+                            senderName: senderName,
+                            text: text,
+                          ),
+                  child: _buildBubble(
+                    isMine: isMine,
+                    senderName: senderName,
+                    roomNumber: roomNumber,
+                    text: text,
+                    time: isLastOfGroup ? time : '',
+                    isFirstOfGroup: isFirstOfGroup,
+                    mediaUrl: mediaUrl,
+                    mediaType: mediaType,
+                    unreadCount: unreadCount,
+                    // 타인 메시지에는 신고/차단 메뉴 버튼을 노출한다.
+                    onModerate: isMine || senderId == null
+                        ? null
+                        : () => _showModerationSheet(
+                              messageId: docs[index].id,
+                              senderId: senderId,
+                              senderName: senderName,
+                              text: text,
+                            ),
+                  ),
                 ),
               ],
             );
@@ -862,6 +1149,7 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     String? mediaUrl,
     String? mediaType,
     int unreadCount = 0,
+    VoidCallback? onModerate,
   }) {
     final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
     final bubbleColor = isMine ? Colors.cyan.shade500 : Colors.white;
@@ -979,6 +1267,17 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                                 fontSize: 10, color: Colors.grey.shade500)),
                       ],
                     ),
+                    // 신고/차단 메뉴 (App Store 가이드라인 1.2)
+                    if (onModerate != null)
+                      GestureDetector(
+                        onTap: onModerate,
+                        behavior: HitTestBehavior.opaque,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 2),
+                          child: Icon(Icons.more_vert,
+                              size: 16, color: Colors.grey.shade400),
+                        ),
+                      ),
                   ],
                 ],
                 ),

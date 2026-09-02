@@ -12,6 +12,7 @@ class UserModel {
   final String? college; // 학부
   final String? department; // 학과
   final String? profileImageUrl;
+  final List<String> blockedUsers; // 차단한 유저 uid 목록
   final DateTime createdAt;
 
   UserModel({
@@ -26,6 +27,7 @@ class UserModel {
     this.college,
     this.department,
     this.profileImageUrl,
+    this.blockedUsers = const [],
     required this.createdAt,
   });
 
@@ -74,6 +76,7 @@ class UserModel {
       'college': college,
       'department': department,
       'profileImageUrl': profileImageUrl,
+      'blockedUsers': blockedUsers,
       'createdAt': createdAt.toIso8601String(),
     };
   }
@@ -91,6 +94,7 @@ class UserModel {
       college: map['college'],
       department: map['department'],
       profileImageUrl: map['profileImageUrl'],
+      blockedUsers: List<String>.from(map['blockedUsers'] ?? []),
       createdAt: map['createdAt'] != null
           ? DateTime.parse(map['createdAt'])
           : DateTime.now(),
@@ -126,6 +130,7 @@ class UserModel {
       college: data['college'],
       department: data['department'],
       profileImageUrl: data['profileImageUrl'],
+      blockedUsers: List<String>.from(data['blockedUsers'] ?? []),
       createdAt: parseCreatedAt(data['createdAt']),
     );
   }

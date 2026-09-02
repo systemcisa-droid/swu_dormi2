@@ -23,7 +23,7 @@ class _PrivacyConsentScreenState extends State<PrivacyConsentScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('개인정보 처리방침'),
+        title: const Text('서비스 이용약관 및 개인정보 처리방침'),
         automaticallyImplyLeading: false,
       ),
       body: Column(
@@ -47,11 +47,71 @@ class _PrivacyConsentScreenState extends State<PrivacyConsentScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            '서비스 이용을 위해 아래 개인정보 처리방침을 읽고 동의해 주세요.',
+                            '서비스 이용을 위해 아래 이용약관 및 개인정보 처리방침을 읽고 동의해 주세요.',
                             style: TextStyle(
                               fontSize: 14,
                               color: Colors.blue.shade800,
                             ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  // ── 서비스 이용약관 (EULA) ──
+                  // App Store 가이드라인 1.2: 부적절한 콘텐츠·이용자에 대한
+                  // 무관용 원칙을 약관에 명시하고 가입 전 동의를 받아야 한다.
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.gavel, color: Colors.orange.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '서비스 이용약관 (EULA)',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange.shade800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          '제1조 (목적)\n'
+                          '본 약관은 기숙사 층장 매니저 앱(이하 "본 앱") 이용에 관한 조건 및 절차, 이용자와 운영자의 권리·의무 및 책임 사항을 규정함을 목적으로 합니다.\n\n'
+                          '제2조 (이용자의 의무)\n'
+                          '이용자는 다음 각 호의 행위를 하여서는 안 됩니다.\n\n'
+                          '• 타인을 비방하거나 명예를 훼손하는 메시지 작성\n'
+                          '• 욕설, 혐오 표현, 음란물 등 부적절한 콘텐츠 게시\n'
+                          '• 허위 사실 유포 및 타인의 개인정보 무단 게재\n'
+                          '• 기숙사 운영을 방해하거나 질서를 해치는 행위\n'
+                          '• 기타 법령 또는 공공질서에 반하는 행위\n\n'
+                          '제3조 (제재 조치)\n'
+                          '본 앱은 부적절한 콘텐츠와 이용자에 대해 무관용 원칙을 적용합니다. 이용자가 제2조를 위반할 경우, 운영자는 사전 통보 없이 즉시 다음 조치를 취할 수 있습니다.\n\n'
+                          '⚠️  비방이나 부적절한 콘텐츠 작성 시 즉시 탈퇴 처리됩니다.\n\n'
+                          '• 해당 콘텐츠 즉시 삭제 및 계정 이용 정지\n'
+                          '• 회원 자격 즉시 박탈 (강제 탈퇴 처리)\n'
+                          '• 필요 시 관련 법령에 따른 법적 조치\n\n'
+                          '제4조 (신고 및 처리)\n'
+                          '이용자는 부적절한 콘텐츠를 발견한 경우 신고 기능을 통해 운영자에게 알릴 수 있으며, 특정 이용자를 차단할 수 있습니다. 운영자는 접수된 신고를 24시간 이내에 검토하여 해당 콘텐츠를 삭제하고 작성자를 퇴출하는 등의 조치를 취합니다.\n\n'
+                          '제5조 (면책 조항)\n'
+                          '운영자는 이용자가 작성한 콘텐츠로 인해 발생한 분쟁에 대해 책임을 지지 않으며, 해당 이용자가 모든 법적 책임을 부담합니다.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade800,
+                            height: 1.6,
                           ),
                         ),
                       ],
@@ -222,7 +282,8 @@ class _PrivacyConsentScreenState extends State<PrivacyConsentScreen> {
                         const SizedBox(width: 8),
                         const Expanded(
                           child: Text(
-                            '[필수] 개인정보 처리방침에 동의합니다.',
+                            '[필수] 서비스 이용약관 및 개인정보 처리방침에 동의합니다.\n'
+                            '(비방·부적절한 콘텐츠 작성 시 즉시 탈퇴 처리)',
                             style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                           ),
                         ),

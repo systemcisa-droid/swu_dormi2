@@ -5,7 +5,6 @@ import 'package:intl/intl.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_player/video_player.dart';
 import '../../services/firestore_service.dart';
-import '../../services/notification_service.dart';
 import '../../models/facility_report_model.dart';
 import '../../utils/building_utils.dart';
 
@@ -641,15 +640,6 @@ class _ReportDetailSheetState extends State<_ReportDetailSheet> {
         _selectedStatus,
         _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim(),
       );
-
-      if (_selectedStatus == 'in_progress' || _selectedStatus == 'completed') {
-        await NotificationService().sendFacilityReportStatusNotification(
-          userId: widget.report.userId,
-          reportId: widget.report.id,
-          status: _selectedStatus,
-          title: widget.report.getCategoryDisplayName(),
-        );
-      }
 
       if (mounted) {
         Navigator.pop(context);

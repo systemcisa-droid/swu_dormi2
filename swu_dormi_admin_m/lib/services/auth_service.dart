@@ -35,6 +35,12 @@ class AuthService {
         throw Exception('관리자 권한이 없습니다.');
       }
 
+      // 이용약관 위반으로 정지된 계정 차단 (App Store 가이드라인 1.2)
+      if (userDoc.exists && userDoc.data()?['disabled'] == true) {
+        await _auth.signOut();
+        throw Exception('이 계정은 이용약관 위반으로 이용이 정지되었습니다.\n문의: dormitory@swu.ac.kr');
+      }
+
       return userCredential;
     } on FirebaseAuthException catch (e) {
       String errorMessage;
@@ -166,6 +172,48 @@ class AuthService {
       throw Exception(errorMessage);
     } catch (e) {
       throw Exception('비밀번호 재설정 이메일 전송 중 오류가 발생했습니다: $e');
+    }
+  }
+
+  // ── 사용자 차단 (App Store 가이드라인 1.2) ──
+
+  /// 차단한 사용자 uid 목록을 가져온다.
+  Future<List<String>> getBlockedUsers() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return [];
+    final doc = await _firestore.collection('users').doc(uid).get();
+    return List<String>.from(doc.data()?['blockedUsers'] ?? []);
+  }
+
+  /// 사용자를 차단한다. 차단하면 해당 사용자의 메시지가 즉시 보이지 않는다.
+  Future<void> blockUser(String targetUid) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) throw Exception('로그인이 필요합니다.');
+    await _firestore.collection('users').doc(uid).update({
+      'blockedUsers': FieldValue.arrayUnion([targetUid]),
+    });
+  }
+
+  /// 차단을 해제한다.
+  Future<void> unblockUser(String targetUid) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) throw Exception('로그인이 필요합니다.');
+    await _firestore.collection('users').doc(uid).update({
+      'blockedUsers': FieldValue.arrayRemove([targetUid]),
+    });
+  }
+
+  /// 현재 로그인한 계정이 이용 정지 상태인지 확인한다.
+  /// 관리자가 신고 처리 중 이용 정지시킨 경우 앱 접속을 막기 위해 사용한다.
+  Future<bool> isCurrentUserDisabled() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return false;
+    try {
+      final doc = await _firestore.collection('users').doc(uid).get();
+      return doc.data()?['disabled'] == true;
+    } catch (_) {
+      // 네트워크 오류 시에는 접속을 막지 않는다.
+      return false;
     }
   }
 }

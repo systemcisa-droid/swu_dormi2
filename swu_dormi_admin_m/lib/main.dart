@@ -142,7 +142,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
         }
 
         if (snapshot.hasData) {
-          return const NavigationShell();
+          // 이용 정지된 계정이면 즉시 로그아웃 (App Store 가이드라인 1.2)
+          return FutureBuilder<bool>(
+            future: _authService.isCurrentUserDisabled(),
+            builder: (context, disabledSnap) {
+              if (disabledSnap.data == true) {
+                _authService.signOut();
+                return const LoginScreen();
+              }
+              return const NavigationShell();
+            },
+          );
         }
 
         return const LoginScreen();
