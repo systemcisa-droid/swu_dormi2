@@ -5,7 +5,9 @@ import '../../providers/locale_provider.dart';
 import '../../utils/meal_strings.dart';
 
 class MealScreen extends StatefulWidget {
-  const MealScreen({super.key});
+  final bool embedded;
+
+  const MealScreen({super.key, this.embedded = false});
 
   @override
   State<MealScreen> createState() => _MealScreenState();
@@ -32,9 +34,11 @@ class _MealScreenState extends State<MealScreen> {
   Widget build(BuildContext context) {
     final s = MealStrings(Provider.of<LocaleProvider>(context).isEnglish);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(s.title),
-      ),
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: Text(s.title),
+            ),
       body: StreamBuilder<QuerySnapshot>(
         stream: _firestore
             .collection('meals')

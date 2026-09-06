@@ -6,11 +6,12 @@
  * 이 함수가 발송을 담당한다.
  *
  * 1) onNotificationRequest : notification_requests 문서 생성 시 발송
- *    (공지사항·식단표·수리신고 상태변경 등 기존 코드가 이미 쌓고 있음)
+ *    (공지사항·메시지·수리신고 상태변경 등 기존 코드가 이미 쌓고 있음)
  * 2) onFloorChatMessage    : 층장단톡방 메시지 생성 시 상대방에게 발송
  */
 
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
 
@@ -115,7 +116,7 @@ function collectTokens(docs) {
 /**
  * 알림 종류별 수신 거부 여부.
  * 학생앱이 users/{uid}.notificationSettings 에 저장한다.
- * 값이 없으면 수신으로 간주한다(식단표만 기본 off).
+ * 값이 없으면 수신으로 간주한다.
  */
 function isEnabled(userData, type) {
   const settings = (userData && userData.notificationSettings) || {};
@@ -126,9 +127,6 @@ function isEnabled(userData, type) {
   // 학생앱 NotificationPrefs.keyByType 과 동일하게 유지할 것.
   const keyByType = {
     notice: "notice_notifications",
-    facility_report: "facility_notifications",
-    facility_status: "facility_notifications",
-    meal: "meal_notifications",
     check_in_out: "check_in_out_notifications",
     message: "admin_message_notifications",
     board_comment: "board_comment_notifications",
@@ -138,9 +136,7 @@ function isEnabled(userData, type) {
   if (!key) return true;
 
   const v = settings[key];
-  if (v === undefined || v === null) {
-    return key !== "meal_notifications"; // 식단표만 기본 off
-  }
+  if (v === undefined || v === null) return true; // 설정이 없으면 수신
   return v === true;
 }
 
@@ -265,20 +261,37 @@ exports.onFloorChatMessage = onDocumentCreated(
       }
 
       // roomId 에서 건물/동/호실 복원 → 해당 호실 학생 + 담당 층장에게 발송
+      // 형식: '샬롬하우스_A동_320호' (3파트) / '바롬인성교육관_1001-A호' (2파트, 동 없음)
       const parts = resolvedRoomId.split("_");
-      if (parts.length < 3) {
+      if (parts.length < 2) {
         console.log("roomId 형식 불일치:", roomId);
         return;
       }
       let dormBuilding = parts[0];
-      let wing = parts[1];
-      // '320호' → '320' (한글 '호'가 정규식으로 안 잘리는 경우가 있어 숫자만 추출)
-      const roomDigits = parts[2].match(/\d+/);
-      if (!roomDigits) {
-        console.log("호실 번호 추출 실패:", parts[2]);
-        return;
+      const isBarom = dormBuilding.startsWith("바롬인성교육관");
+      let wing = null;
+      let roomNumber;
+      if (isBarom) {
+        // '1001-A호' → '1001-A' (바롬 호실은 접미사까지 포함)
+        roomNumber = parts[1].replace(/호$/, "").trim();
+        if (!roomNumber) {
+          console.log("호실 번호 추출 실패:", parts[1]);
+          return;
+        }
+      } else {
+        if (parts.length < 3) {
+          console.log("roomId 형식 불일치:", roomId);
+          return;
+        }
+        wing = parts[1];
+        // '320호' → '320' (한글 '호'가 정규식으로 안 잘리는 경우가 있어 숫자만 추출)
+        const roomDigits = parts[2].match(/\d+/);
+        if (!roomDigits) {
+          console.log("호실 번호 추출 실패:", parts[2]);
+          return;
+        }
+        roomNumber = roomDigits[0];
       }
-      let roomNumber = roomDigits[0];
 
       // 방 ID의 한글이 손상돼 전달되는 경우가 있으므로,
       // 발신자(users 문서)의 건물/호실을 신뢰할 수 있는 값으로 사용한다.
@@ -294,15 +307,19 @@ exports.onFloorChatMessage = onDocumentCreated(
               dormBuilding = sDorm;
               roomNumber = sRoom;
               const sWing = (s.building || "").trim();
-              if (sWing) wing = sWing;
+              if (sWing && !dormBuilding.startsWith("바롬인성교육관")) wing = sWing;
             } else if (s.role === "admin_m") {
               // 층장이 보낸 경우: 본인 거주지는 무관하므로 담당 구역에서 건물만 가져온다.
-              // (호실은 방 ID에서 뽑은 숫자를 그대로 쓴다 — 숫자는 손상되지 않는다)
+              // (호실은 방 ID에서 뽑은 값을 그대로 쓴다)
               const af = (s.assignedFloor || "").trim();
-              const m = af.match(/^(.+?)\s+([AB]동)\s+\d+층$/);
-              if (m) {
-                dormBuilding = m[1];
-                wing = m[2];
+              const mWing = af.match(/^(.+?)\s+([AB]동)\s+\d+층$/);
+              const mBarom = af.match(/^(바롬인성교육관\S*)\s+\d+층$/);
+              if (mWing) {
+                dormBuilding = mWing[1];
+                wing = mWing[2];
+              } else if (mBarom) {
+                dormBuilding = mBarom[1];
+                wing = null;
               }
             }
           }
@@ -318,9 +335,10 @@ exports.onFloorChatMessage = onDocumentCreated(
         .where("roomNumber", "==", roomNumber)
         .get();
 
-      // 담당 층장 (assignedFloor 가 '샬롬하우스 A동 2층' 형태)
+      // 담당 층장 (assignedFloor 가 '샬롬하우스 A동 2층' / '바롬인성교육관 10층' 형태)
       // 동은 저장값('미배정' 가능)보다 호실 번호로 계산한 값을 신뢰한다.
-      const n = parseInt(roomNumber, 10);
+      // 바롬은 '1001-A' 형식이라 접미사를 떼고 층 계산.
+      const n = parseInt(isBarom ? roomNumber.split("-")[0] : roomNumber, 10);
       let computedWing = null;
       if (dormBuilding.startsWith("국제생활관")) {
         if ((n >= 101 && n <= 132) || (n >= 201 && n <= 229)) computedWing = "A동";
@@ -333,7 +351,9 @@ exports.onFloorChatMessage = onDocumentCreated(
       if (computedWing) wing = computedWing;
 
       const floorNum = Math.floor(n / 100);
-      const assignedFloor = `${dormBuilding} ${wing} ${floorNum}층`;
+      const assignedFloor = isBarom
+        ? `${dormBuilding} ${floorNum}층`
+        : `${dormBuilding} ${wing} ${floorNum}층`;
       const captainsSnap = await db
         .collection("users")
         .where("role", "==", "admin_m")
@@ -374,3 +394,30 @@ exports.onFloorChatMessage = onDocumentCreated(
     }
   }
 );
+
+// ──────────────────────────────────────────────────────────
+// 3) 이메일 가입 전, 동일 이메일의 구글 가입 여부 확인
+//
+// 클라이언트 SDK의 fetchSignInMethodsForEmail은 Firebase 프로젝트의
+// "이메일 열거 보호"가 켜져 있으면 항상 빈 배열을 반환해 신뢰할 수 없다.
+// Admin SDK(auth().getUserByEmail)는 이 보호의 영향을 받지 않으므로
+// 서버(Cloud Functions)에서만 정확히 판별할 수 있다.
+// ──────────────────────────────────────────────────────────
+exports.checkEmailSignInMethods = onCall(async (request) => {
+  const email = (request.data && request.data.email || "").trim();
+  if (!email) {
+    throw new HttpsError("invalid-argument", "이메일이 필요합니다.");
+  }
+
+  try {
+    const userRecord = await admin.auth().getUserByEmail(email);
+    const providers = (userRecord.providerData || []).map((p) => p.providerId);
+    return { exists: true, providers };
+  } catch (e) {
+    if (e.code === "auth/user-not-found") {
+      return { exists: false, providers: [] };
+    }
+    console.error("이메일 가입 수단 조회 오류:", e);
+    throw new HttpsError("internal", "가입 정보를 확인하지 못했습니다.");
+  }
+});

@@ -16,6 +16,11 @@ class AuthProvider extends ChangeNotifier {
   // Firebase Auth 로그인은 성공했지만 아직 users 문서가 없는(학번 미입력) 신규 가입자의 uid.
   // null이 아니면 화면은 학번 입력 페이지를 보여줘야 한다.
   String? _pendingGoogleUid;
+  // 이메일 회원가입 진행 중 플래그.
+  // signUpWithEmail은 Auth 계정 생성 → Firestore 문서 생성 순으로 진행되는데,
+  // 그 사이 authStateChanges가 먼저 발동하면 users 문서가 아직 없어 구글 신규가입으로
+  // 오인해 학번 입력 화면으로 잘못 튀는 레이스가 있었다. 가입 진행 중에는 이를 막는다.
+  bool _isEmailSignUpInProgress = false;
 
   UserModel? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
@@ -56,10 +61,19 @@ class AuthProvider extends ChangeNotifier {
       if (user != null) {
         try {
           final fetched = await _authService.getUserData(user.uid);
-          if (fetched != null) {
+          if (fetched != null && fetched.disabled) {
+            // 이용 정지된 계정 — 즉시 로그아웃 (가이드라인 1.2, 작성자 퇴출)
+            await _authService.signOut();
+            _currentUser = null;
+            _pendingGoogleUid = null;
+            await _clearUserCache();
+          } else if (fetched != null) {
             _currentUser = fetched;
             _pendingGoogleUid = null;
             await _saveUserToCache(fetched);
+          } else if (_isEmailSignUpInProgress) {
+            // 이메일 가입이 users 문서를 생성하는 중이므로 아무 상태도 바꾸지 않고
+            // signUpWithEmail이 끝날 때까지 기다린다 (로딩 화면 유지).
           } else {
             // Firestore 문서가 없으면 캐시에서 먼저 복원을 시도한다.
             final cached = await _loadCachedUser();
@@ -100,15 +114,28 @@ class AuthProvider extends ChangeNotifier {
     required String password,
     required String name,
   }) async {
+    _isEmailSignUpInProgress = true;
     try {
-      await _authService.signUpWithEmail(
+      final credential = await _authService.signUpWithEmail(
         email: email,
         password: password,
         name: name,
       );
+      final uid = credential?.user?.uid;
+      if (uid != null) {
+        final fetched = await _authService.getUserData(uid);
+        if (fetched != null) {
+          _currentUser = fetched;
+          await _saveUserToCache(fetched);
+        }
+      }
       return null;
     } catch (e) {
-      return e.toString();
+      final message = e.toString();
+      return message.startsWith('Exception: ') ? message.substring(11) : message;
+    } finally {
+      _isEmailSignUpInProgress = false;
+      notifyListeners();
     }
   }
 
@@ -126,6 +153,10 @@ class AuthProvider extends ChangeNotifier {
         if (userData == null || userData.role != 'student') {
           await _authService.signOut();
           return '학생 계정만 로그인할 수 있습니다.';
+        }
+        if (userData.disabled) {
+          await _authService.signOut();
+          return '이 계정은 이용약관 위반으로 이용이 정지되었습니다.\n문의: dormitory@swu.ac.kr';
         }
       }
       return null;
@@ -152,6 +183,10 @@ class AuthProvider extends ChangeNotifier {
         if (userData == null || userData.role != 'student') {
           await _authService.signOut();
           return '학생 계정만 로그인할 수 있습니다.';
+        }
+        if (userData.disabled) {
+          await _authService.signOut();
+          return '이 계정은 이용약관 위반으로 이용이 정지되었습니다.\n문의: dormitory@swu.ac.kr';
         }
       }
       return null;

@@ -13,18 +13,19 @@ import '../../utils/home_strings.dart';
 import '../../utils/notification_prefs.dart';
 import '../notices/notices_screen.dart';
 import '../check_in_out/check_in_out_screen.dart';
+import '../student_council/student_council_screen.dart';
 import '../facilities/facility_report_screen.dart';
-import '../meal/meal_screen.dart';
 import '../profile/profile_screen.dart';
 import '../notification/notification_screen.dart';
 import '../profile/regulation_screen.dart';
-import '../board/board_screen.dart';
+import '../board/board_meal_screen.dart';
 import '../cleaning/cleaning_inspection_screen.dart';
 import '../cleaning/move_out_inspection_screen.dart';
 import '../message/floor_chat_screen.dart';
 import '../attendance/attendance_screen.dart';
 import '../attendance/my_qr_code_page.dart';
 import '../reservation/reservation_screen.dart';
+import '../timetable/timetable_page.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -590,7 +591,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               : null,
                         ),
                       ),
-                      const SizedBox(width: 32),
+                      const Spacer(),
                       // 내 QR 코드 생성
                       if (user != null)
                         Material(
@@ -624,20 +625,68 @@ class _HomeScreenState extends State<HomeScreen> {
                             },
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 8),
+                                  horizontal: 8, vertical: 8),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
                                     Icons.qr_code_2,
-                                    size: 50,
+                                    size: 44,
                                     color: Theme.of(context).colorScheme.primary,
-                                  ),                          
+                                  ),
+                                  Text(
+                                    s.menuMyQrShort,
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color:
+                                          Theme.of(context).colorScheme.primary,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
                           ),
                         ),
+                      const SizedBox(width: 8),
+                      // 내 시간표
+                      Material(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () {
+                            Navigator.pop(context);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const TimetablePage(),
+                              ),
+                            );
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 8),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.calendar_view_week,
+                                  size: 44,
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                Text(
+                                  s.menuTimetableShort,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color:
+                                        Theme.of(context).colorScheme.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -672,7 +721,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.announcement, color: Colors.blue),
+              leading: const Icon(Icons.announcement, color: Colors.red),
               title: Text(s.menuNotices),
               onTap: () {
                 Navigator.pop(context);
@@ -682,24 +731,15 @@ class _HomeScreenState extends State<HomeScreen> {
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.forum, color: Colors.deepPurple),
-              title: Text(s.menuBoard),
+              title: Text(s.menuBoardMeal),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const BoardScreen()));
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const BoardMealScreen()));
               },
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.restaurant, color: Colors.green),
-              title: Text(s.menuMeal),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(context, MaterialPageRoute(builder: (context) => const MealScreen()));
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.build, color: Colors.red),
+              leading: const Icon(Icons.build, color: Colors.pinkAccent),
               title: Text(s.menuFacilityReport),
               onTap: () async {
                 final navigator = Navigator.of(context);
@@ -714,7 +754,7 @@ class _HomeScreenState extends State<HomeScreen> {
               title: Text(s.menuCleaningInspection),
               children: [
                 ListTile(
-                  leading: const Icon(Icons.calendar_month, color: Colors.cyan),
+                  leading: const Icon(Icons.calendar_month, color: Colors.deepPurple),
                   title: Text(s.menuCleaningMonthly),
                   contentPadding: const EdgeInsets.only(left: 32, right: 16),
                   onTap: () async {
@@ -727,7 +767,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.exit_to_app, color: Colors.cyan),
+                  leading: const Icon(Icons.exit_to_app, color: Colors.redAccent),
                   title: Text(s.menuMoveOutCheck),
                   contentPadding: const EdgeInsets.only(left: 32, right: 16),
                   onTap: () async {
@@ -753,6 +793,45 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             const Divider(height: 1),
+            _buildChatDrawerTile(context, user, s),
+            const Divider(height: 1),
+            ExpansionTile(
+              leading: const Icon(Icons.groups, color: Colors.orange),
+              title: Text(s.menuStudentCouncil),
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.campaign_outlined, color: Colors.redAccent),
+                  title: Text(s.menuCouncilNotices),
+                  contentPadding: const EdgeInsets.only(left: 32, right: 16),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => const CouncilNoticesScreen()));
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.volunteer_activism_outlined, color: Colors.green),
+                  title: Text(s.menuCouncilCampaigns),
+                  contentPadding: const EdgeInsets.only(left: 32, right: 16),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => const CouncilCampaignsScreen()));
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.how_to_vote_outlined, color: Colors.lightBlue),
+                  title: Text(s.menuCouncilElections),
+                  contentPadding: const EdgeInsets.only(left: 32, right: 16),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute(
+                        builder: (context) => const CouncilElectionsScreen()));
+                  },
+                ),
+              ],
+            ),
+            const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.event_seat, color: Colors.indigo),
               title: Text(s.menuReservation),
@@ -764,10 +843,8 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             const Divider(height: 1),
-            _buildChatDrawerTile(context, user, s),
-            const Divider(height: 1),
             ExpansionTile(
-              leading: const Icon(Icons.description, color: Colors.indigo),
+              leading: const Icon(Icons.description, color: Colors.black),
               title: Text(s.menuRegulationGroup),
               children: [
                 ListTile(
@@ -780,7 +857,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.meeting_room, color: Colors.indigo),
+                  leading: const Icon(Icons.meeting_room, color: Colors.deepPurple),
                   title: Text(s.menuCheckInOut),
                   contentPadding: const EdgeInsets.only(left: 32, right: 16),
                   onTap: () {
@@ -878,7 +955,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(width: 6),
           const Text(
-            '기숙사(2학기)',
+            '기숙사',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,

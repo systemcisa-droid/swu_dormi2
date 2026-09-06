@@ -11,7 +11,9 @@ import 'add_post_screen.dart';
 import 'post_detail_screen.dart';
 
 class BoardScreen extends StatefulWidget {
-  const BoardScreen({super.key});
+  final bool embedded;
+
+  const BoardScreen({super.key, this.embedded = false});
 
   @override
   State<BoardScreen> createState() => _BoardScreenState();
@@ -32,28 +34,24 @@ class _BoardScreenState extends State<BoardScreen> {
     final user = authProvider.currentUser;
     final s = BoardStrings(Provider.of<LocaleProvider>(context).isEnglish);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(s.title),
-        centerTitle: true,
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          if (user == null) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(s.loginRequired)),
-            );
-            return;
-          }
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const AddPostScreen()),
+    final fab = FloatingActionButton.extended(
+      onPressed: () {
+        if (user == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(s.loginRequired)),
           );
-        },
-        icon: const Icon(Icons.edit),
-        label: Text(s.write),
-      ),
-      body: Column(
+          return;
+        }
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const AddPostScreen()),
+        );
+      },
+      icon: const Icon(Icons.edit),
+      label: Text(s.write),
+    );
+
+    final body = Column(
         children: [
           // 카테고리 필터 탭
           SizedBox(
@@ -178,7 +176,17 @@ class _BoardScreenState extends State<BoardScreen> {
             ),
           ),
         ],
-      ),
+      );
+
+    return Scaffold(
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: Text(s.title),
+              centerTitle: true,
+            ),
+      floatingActionButton: fab,
+      body: body,
     );
   }
 

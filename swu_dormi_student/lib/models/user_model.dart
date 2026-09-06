@@ -16,6 +16,7 @@ class UserModel {
   final int points; // 상벌점 (마이너스 가능)
   final String residentStatus; // 재실중, 바롬인성교육관, 자퇴
   final List<String> blockedUsers; // 차단한 유저 uid 목록
+  final bool disabled; // 관리자가 이용 정지시킨 계정 (App Store 가이드라인 1.2 — 작성자 퇴출)
 
   UserModel({
     required this.uid,
@@ -35,6 +36,7 @@ class UserModel {
     this.points = 0, // 기본값 0점
     this.residentStatus = '재실중',
     this.blockedUsers = const [],
+    this.disabled = false,
   });
 
   // 호실번호로부터 동 계산
@@ -119,6 +121,7 @@ class UserModel {
       'points': points,
       'residentStatus': residentStatus,
       'blockedUsers': blockedUsers,
+      'disabled': disabled,
     };
   }
 
@@ -143,6 +146,7 @@ class UserModel {
       points: map['points'] ?? 0,
       residentStatus: (map['residentStatus'] as String?) ?? '재실중',
       blockedUsers: List<String>.from(map['blockedUsers'] ?? []),
+      disabled: map['disabled'] == true,
     );
   }
 }

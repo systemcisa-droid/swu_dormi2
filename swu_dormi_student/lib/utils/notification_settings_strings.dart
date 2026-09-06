@@ -13,12 +13,8 @@ class NotificationSettingsStrings {
 
   String get notices => _t('공지사항', 'Notices');
   String get noticesSubtitle => _t('새로운 공지사항 알림', 'New notice alerts');
-  String get facilityReport => _t('시설 신고', 'Facility Report');
-  String get facilityReportSubtitle => _t('시설 신고 답변 알림', 'Facility report response alerts');
   String get checkInOut => _t('입사/퇴사', 'Move-in/out');
   String get checkInOutSubtitle => _t('입사/퇴사 신청 승인/거부 알림', 'Move-in/out request approval/rejection alerts');
-  String get meal => _t('식단표', 'Meal Plan');
-  String get mealSubtitle => _t('새로운 식단 등록 알림', 'New meal plan alerts');
   String get floorChat => _t('층장단톡방', 'Floor Captain Chat');
   String get floorChatSubtitle => _t('층장단톡방 새 메시지 알림', 'New message alerts in the floor captain chat');
   String get adminMessage => _t('행정실', 'Admin Office');

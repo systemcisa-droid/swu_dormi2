@@ -179,7 +179,7 @@ class CheckInOutContent {
       sections: [
         SubSection(
           titleKo: '가. 벌점 기준', titleEn: 'a. Penalty Point Criteria',
-          contentKo: '입사학기 (1학기, 여름방학, 2학기, 겨울방학) 단위로 하여, 각 학기 16점 이상의 벌점을 받은 경우 규정에 따라 강제퇴사될 수 있으며, 강제퇴사가 결정된 학생은 행정실에서 지정하는 기간 (퇴사 결정일로부터 5일) 내에 퇴사해야 한다.',
+          contentKo: '입사학기 (1학기, 여름방학, 2학기, 방학) 단위로 하여, 각 학기 16점 이상의 벌점을 받은 경우 규정에 따라 강제퇴사될 수 있으며, 강제퇴사가 결정된 학생은 행정실에서 지정하는 기간 (퇴사 결정일로부터 5일) 내에 퇴사해야 한다.',
           contentEn: 'On a per-residency-semester basis (Semester 1, summer break, Semester 2, winter break), a resident who accumulates 16 or more penalty points in a given semester may be forced to move out under the regulations; a student whose forced move-out has been decided must move out within the period designated by the administrative office (5 days from the date of the move-out decision).',
         ),
         SubSection(

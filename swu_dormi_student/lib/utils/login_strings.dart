@@ -23,6 +23,10 @@ class LoginStrings {
       _t('비밀번호 재설정 이메일이 발송되었습니다', 'Password reset email has been sent');
   String get orDivider => _t('또는', 'OR');
   String get googleLogin => _t('Google 계정으로 로그인', 'Sign in with Google');
+  String get googleLoginNoSignup =>
+      _t('회원가입 없이 바로 시작 · Google 계정이면 OK',
+          'Start right away — no sign-up needed with your Google account');
+  String get emailLoginToggle => _t('이메일로 로그인 / 회원가입', 'Log in / sign up with email');
   String get googleLoginNotStudent =>
       _t('학생 계정만 로그인할 수 있습니다.', 'Only student accounts can log in.');
   String get googleStudentIdLabel => _t('학번', 'Student ID');

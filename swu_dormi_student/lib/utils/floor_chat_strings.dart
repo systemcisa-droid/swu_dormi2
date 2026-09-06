@@ -48,4 +48,10 @@ class FloorChatStrings {
   /// 날짜 구분선 형식
   String get dateFormat => _t('yyyy년 MM월 dd일 (E)', 'MMM d, yyyy (E)');
   String get dateLocale => _t('ko', 'en');
+
+  /// 답장(스와이프) 관련
+  String replyingTo(String name) => _t('$name님에게 답장', 'Replying to $name');
+  String get replyToSelf => _t('나에게 답장', 'Replying to yourself');
+  String get replyMediaImage => _t('[사진]', '[Photo]');
+  String get replyMediaVideo => _t('[영상]', '[Video]');
 }

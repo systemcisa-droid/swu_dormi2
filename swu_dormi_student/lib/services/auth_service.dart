@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../models/user_model.dart';
 
@@ -14,6 +16,8 @@ class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'asia-northeast3');
 
   // Get current user
   User? get currentUser => _auth.currentUser;
@@ -22,34 +26,87 @@ class AuthService {
   Stream<User?> get authStateChanges => _auth.authStateChanges();
 
   // Sign up with email and password
+  // email 아이디 부분(@swu.ac.kr 앞)이 곧 학번이므로, 구글 가입자와 동일한 학번
+  // 중복 방지 규칙(student_ids 컬렉션)을 이메일 가입에도 동일하게 적용한다.
   Future<UserCredential?> signUpWithEmail({
     required String email,
     required String password,
     required String name,
   }) async {
+    // Firebase 클라이언트 SDK의 email-already-in-use 에러는 "이메일+비밀번호"
+    // 수단이 이미 있을 때만 발생하고, 구글로만 가입된 이메일은 걸러내지 못한다.
+    // (프로젝트의 이메일 열거 보호 설정 때문에 클라이언트에서 직접 조회도 신뢰할 수 없어
+    //  Admin SDK를 쓰는 Cloud Function으로 사전 확인한다.)
+    await _ensureNoExistingGoogleAccount(email);
+
+    final studentId = email.split('@').first;
+    final studentIdRef = _firestore.collection('student_ids').doc(studentId);
+
+    // 계정 생성 전에 먼저 확인해 대부분의 중복을 걸러낸다.
+    // (동시 가입 레이스는 아래 계정 생성 후 재확인 + 롤백으로 최종 방어한다.)
+    if ((await studentIdRef.get()).exists) {
+      throw Exception('이미 동일한 학번으로 가입된 계정이 존재합니다.');
+    }
+
+    UserCredential? userCredential;
     try {
-      UserCredential userCredential = await _auth.createUserWithEmailAndPassword(
+      userCredential = await _auth.createUserWithEmailAndPassword(
         email: email,
         password: password,
       );
+      final uid = userCredential.user!.uid;
 
       // Create user document in Firestore
       UserModel newUser = UserModel(
-        uid: userCredential.user!.uid,
+        uid: uid,
         email: email,
         name: name,
+        studentId: studentId,
         roomNumber: '000', // 기본값
         createdAt: DateTime.now(),
       );
 
-      await _firestore
-          .collection('users')
-          .doc(userCredential.user!.uid)
-          .set(newUser.toMap());
+      // users 문서와 student_ids 문서를 하나의 트랜잭션으로 함께 생성해
+      // 두 컬렉션 간 데이터 불일치와 동시 가입으로 인한 학번 중복을 함께 방지한다.
+      await _firestore.runTransaction((tx) async {
+        final duplicateDoc = await tx.get(studentIdRef);
+        if (duplicateDoc.exists) {
+          throw Exception('이미 동일한 학번으로 가입된 계정이 존재합니다.');
+        }
+        tx.set(_firestore.collection('users').doc(uid), newUser.toMap());
+        // provider: 이 학번이 어떤 수단으로 가입했는지 구분 (G=구글, A=애플, E=이메일)
+        tx.set(studentIdRef, {'uid': uid, 'provider': 'E'});
+      });
 
       return userCredential;
     } on FirebaseAuthException catch (e) {
       throw _handleAuthException(e);
+    } catch (e) {
+      // 트랜잭션에서 학번 중복이 뒤늦게 발견된 경우, 이미 만들어진 Auth 계정을 정리한다.
+      if (userCredential?.user != null) {
+        await userCredential!.user!.delete();
+      }
+      rethrow;
+    }
+  }
+
+  // 동일 이메일로 구글 계정이 이미 존재하면 예외를 던진다.
+  // Cloud Function 호출이 실패해도(네트워크 오류 등) 가입 자체를 막지는 않는다 —
+  // 이 경우 실제 중복은 Firebase Auth의 email-already-in-use로 최종 검증된다.
+  Future<void> _ensureNoExistingGoogleAccount(String email) async {
+    try {
+      final result = await _functions
+          .httpsCallable('checkEmailSignInMethods')
+          .call({'email': email});
+      final data = result.data as Map<dynamic, dynamic>;
+      final providers = (data['providers'] as List<dynamic>? ?? [])
+          .map((p) => p.toString())
+          .toList();
+      if (providers.contains('google.com')) {
+        throw Exception('이미 구글 계정으로 가입된 이메일입니다. 구글 로그인을 이용해주세요.');
+      }
+    } on FirebaseFunctionsException catch (e) {
+      debugPrint('구글 가입 여부 확인 실패(무시하고 진행): ${e.message}');
     }
   }
 
@@ -124,7 +181,8 @@ class AuthService {
     // 두 컬렉션 간 데이터 불일치(예: users만 생성되고 student_ids가 누락되는 상황)를 방지한다.
     final batch = _firestore.batch();
     batch.set(_firestore.collection('users').doc(uid), newUser.toMap());
-    batch.set(studentIdRef, {'uid': uid});
+    // provider: 이 학번이 어떤 수단으로 가입했는지 구분 (G=구글, A=애플, E=이메일)
+    batch.set(studentIdRef, {'uid': uid, 'provider': 'G'});
     await batch.commit();
   }
 

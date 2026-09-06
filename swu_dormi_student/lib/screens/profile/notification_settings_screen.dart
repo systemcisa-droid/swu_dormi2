@@ -17,9 +17,7 @@ class _NotificationSettingsScreenState
     extends State<NotificationSettingsScreen> {
   bool _allNotifications = true;
   bool _noticeNotifications = true;
-  bool _facilityNotifications = true;
   // 식단표 알림은 기본 꺼짐(사용자가 직접 켜야 받는다)
-  bool _mealNotifications = false;
   bool _checkInOutNotifications = true;
   bool _messageNotifications = true;
   bool _adminMessageNotifications = true;
@@ -40,8 +38,6 @@ class _NotificationSettingsScreenState
     setState(() {
       _allNotifications = settings['all_notifications'] ?? true;
       _noticeNotifications = settings['notice_notifications'] ?? true;
-      _facilityNotifications = settings['facility_notifications'] ?? true;
-      _mealNotifications = settings['meal_notifications'] ?? false;
       _checkInOutNotifications =
           settings['check_in_out_notifications'] ?? true;
       _messageNotifications = settings['message_notifications'] ?? true;
@@ -60,8 +56,6 @@ class _NotificationSettingsScreenState
     await NotificationPrefs.save(userId, {
       'all_notifications': _allNotifications,
       'notice_notifications': _noticeNotifications,
-      'facility_notifications': _facilityNotifications,
-      'meal_notifications': _mealNotifications,
       'check_in_out_notifications': _checkInOutNotifications,
       'message_notifications': _messageNotifications,
       'admin_message_notifications': _adminMessageNotifications,
@@ -111,16 +105,12 @@ class _NotificationSettingsScreenState
                   _allNotifications = value;
                   if (!value) {
                     _noticeNotifications = false;
-                    _facilityNotifications = false;
-                    _mealNotifications = false;
                     _checkInOutNotifications = false;
                     _messageNotifications = false;
                     _adminMessageNotifications = false;
                     _boardCommentNotifications = false;
                   } else {
                     _noticeNotifications = true;
-                    _facilityNotifications = true;
-                    _mealNotifications = true;
                     _checkInOutNotifications = true;
                     _messageNotifications = true;
                     _adminMessageNotifications = true;
@@ -162,22 +152,6 @@ class _NotificationSettingsScreenState
           const Divider(height: 1, indent: 72),
 
           _buildNotificationTile(
-            icon: Icons.build,
-            iconColor: Colors.red,
-            title: s.facilityReport,
-            subtitle: s.facilityReportSubtitle,
-            value: _facilityNotifications,
-            enabled: _allNotifications,
-            onChanged: (value) {
-              setState(() {
-                _facilityNotifications = value;
-              });
-              _saveSettings();
-            },
-          ),
-          const Divider(height: 1, indent: 72),
-
-          _buildNotificationTile(
             icon: Icons.meeting_room,
             iconColor: Colors.purple,
             title: s.checkInOut,
@@ -187,22 +161,6 @@ class _NotificationSettingsScreenState
             onChanged: (value) {
               setState(() {
                 _checkInOutNotifications = value;
-              });
-              _saveSettings();
-            },
-          ),
-          const Divider(height: 1, indent: 72),
-
-          _buildNotificationTile(
-            icon: Icons.restaurant,
-            iconColor: Colors.green,
-            title: s.meal,
-            subtitle: s.mealSubtitle,
-            value: _mealNotifications,
-            enabled: _allNotifications,
-            onChanged: (value) {
-              setState(() {
-                _mealNotifications = value;
               });
               _saveSettings();
             },

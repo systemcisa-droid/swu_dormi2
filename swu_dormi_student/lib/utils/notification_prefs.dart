@@ -12,15 +12,13 @@ class NotificationPrefs {
   /// 알림 type → 설정 키 (Firestore 필드명 겸 로컬 키)
   static const Map<String, String> keyByType = {
     'notice': 'notice_notifications',
-    'facility_report': 'facility_notifications',
-    'meal': 'meal_notifications',
     'check_in_out': 'check_in_out_notifications',
     'message': 'admin_message_notifications',
     'board_comment': 'board_comment_notifications',
   };
 
   /// 기본 꺼짐인 설정(그 외는 기본 켜짐)
-  static const Set<String> defaultOffKeys = {'meal_notifications'};
+  static const Set<String> defaultOffKeys = <String>{};
 
   static bool defaultOf(String key) => !defaultOffKeys.contains(key);
 

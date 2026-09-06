@@ -57,10 +57,13 @@ android {
             } else {
                 signingConfig = signingConfigs.getByName("debug")
             }
-            // Temporarily disable minification to identify issues
-            isMinifyEnabled = false
-            // Disable resource shrinking when minify is disabled
-            isShrinkResources = false
+            // R8 축소/난독화 활성화 (Play Console 난독화 비율 개선)
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }

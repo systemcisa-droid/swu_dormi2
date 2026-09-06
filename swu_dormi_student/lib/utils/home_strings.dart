@@ -11,6 +11,7 @@ class HomeStrings {
   String get menuNotices => _t('공지사항 & 기숙사일정', 'Notices & Dorm Schedule');
   String get menuBoard => _t('게시판', 'Board');
   String get menuMeal => _t('식단표', 'Meal Plan');
+  String get menuBoardMeal => _t('게시판&식단표', 'Board & Meal Plan');
   String get menuFacilityReport => _t('수리 보수 신청', 'Repair Request');
 
   // 사생수칙 동의 필요 안내
@@ -31,6 +32,8 @@ class HomeStrings {
   String get menuFloorChat =>
       _t('층장단톡(청검|인검 문의)', 'Floor Captain Chat (Cleaning/Attendance)');
   String get floorChatTooltip => _t('층장단톡방', 'Floor Captain Chat');
+  String get menuMyQrShort => _t('내 QR', 'My QR');
+  String get menuTimetableShort => _t('시간표', 'Timetable');
 
   // 팝업 공지
   String get popupNoticeDefaultTitle => _t('공지사항', 'Notice');
@@ -40,6 +43,10 @@ class HomeStrings {
   String get menuRegulationGroup => _t('사생수칙 & 입사퇴사', 'Rules & Move-in/out');
   String get menuRegulation => _t('사생수칙', 'Resident Rules');
   String get menuCheckInOut => _t('입사퇴사', 'Move-in/out');
+  String get menuStudentCouncil => _t('사생회', 'Resident Council');
+  String get menuCouncilNotices => _t('공지', 'Notices');
+  String get menuCouncilCampaigns => _t('캠페인', 'Campaigns');
+  String get menuCouncilElections => _t('선거', 'Elections');
   String get menuRewardPenalty => _t('상벌점', 'Reward/Penalty Points');
   String get menuLanguage => _t('언어', 'Language');
 }

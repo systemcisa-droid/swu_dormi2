@@ -20,7 +20,7 @@ import '../../utils/facility_report_strings.dart';
 ///
 /// 국제생활관은 호실 번호만으로 동이 정해지므로, 저장된 building 값이
 /// '미배정'이어도 여기서 올바른 동을 구할 수 있다.
-/// '(겨울방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
+/// '(방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
 String? _wingFromRoom(String? dormBuilding, String roomNumber) {
   if (dormBuilding == null || dormBuilding.isEmpty) return null;
   final room = int.tryParse(roomNumber) ?? 0;
