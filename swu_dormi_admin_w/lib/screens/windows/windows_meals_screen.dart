@@ -1,7 +1,6 @@
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:swu_dormi_admin/services/firestore_service.dart';
 import 'package:swu_dormi_admin/services/storage_service.dart';
-import '../../services/notification_service.dart';
 import 'package:swu_dormi_admin/models/meal_model.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -418,7 +417,7 @@ class _WindowsMealsScreenState extends State<WindowsMealsScreen> {
       final slotName = '$_selectedYear.${_selectedMonth.toString().padLeft(2, '0')} $_selectedWeekNumber번째주 식단';
 
       // Firestore에 저장
-      final mealId = await _firestoreService.addMeal({
+      await _firestoreService.addMeal({
         'title': slotName,
         'imageUrl': imageUrl,
         'imageName': selectedPdfFileName,
@@ -426,12 +425,6 @@ class _WindowsMealsScreenState extends State<WindowsMealsScreen> {
         'month': _selectedMonth,
         'weekNumber': _selectedWeekNumber,
       });
-
-      // 전체 학생에게 식단표 등록 알림 (실패해도 등록 자체는 유지)
-      await NotificationService().sendMealNotification(
-        mealId: mealId,
-        title: slotName,
-      );
 
       if (!mounted) return;
 

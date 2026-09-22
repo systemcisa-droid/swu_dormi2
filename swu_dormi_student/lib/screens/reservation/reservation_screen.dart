@@ -35,6 +35,20 @@ const _kGlobalRooms = [
   _SeminarRoom('global_232', '국제생활관 232호'),
 ];
 
+// 샬롬하우스 125호는 매주 월요일 21:30~22:30에 예약할 수 없다 (고정 일정 사용).
+// 슬롯 43=21:30~22:00, 44=22:00~22:30 (endSlot은 기존 예약과 같이 포함 범위).
+const String _kBlockedRoomId = 'shalom_125';
+const int _kBlockedWeekday = DateTime.monday;
+const int _kBlockedStartSlot = 43;
+const int _kBlockedEndSlot = 44;
+
+bool _isRuleBlockedSlot(String roomId, int slotIndex, DateTime date) {
+  return roomId == _kBlockedRoomId &&
+      date.weekday == _kBlockedWeekday &&
+      slotIndex >= _kBlockedStartSlot &&
+      slotIndex <= _kBlockedEndSlot;
+}
+
 class ReservationScreen extends StatefulWidget {
   const ReservationScreen({super.key});
 
@@ -93,6 +107,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
           .where('date', isEqualTo: today)
           .get();
 
+      final now = DateTime.now();
       final booked = <String, Set<int>>{};
       Map<String, dynamic>? myReservation;
       for (final doc in snap.docs) {
@@ -107,6 +122,15 @@ class _ReservationScreenState extends State<ReservationScreen> {
         }
         if (data['userId'] == user?.uid) {
           myReservation = data;
+        }
+      }
+      // 요일·시간 고정 제한(예: 샬롬하우스 125호 월요일 21:30~22:30)을 이미 예약된 것처럼 병합한다.
+      // 이렇게 하면 칸 색칠·탭 방지·범위 검증이 기존 예약과 동일한 로직으로 동작한다.
+      for (final room in [..._kShalomRooms, ..._kGlobalRooms]) {
+        for (int i = 0; i < _kTotalSlots; i++) {
+          if (_isRuleBlockedSlot(room.id, i, now)) {
+            booked.putIfAbsent(room.id, () => {}).add(i);
+          }
         }
       }
 
@@ -184,6 +208,16 @@ class _ReservationScreenState extends State<ReservationScreen> {
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     final user = authProvider.currentUser;
     if (user == null) return;
+
+    // 요일·시간 고정 제한 재확인 (로드 시점과 자정을 넘겨 제출 시점의 요일이 달라지는 경우 대비).
+    for (int i = _rangeStart!; i <= _rangeEnd!; i++) {
+      if (_isRuleBlockedSlot(room.id, i, DateTime.now())) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(s.shalom125MondayCaution), backgroundColor: Colors.red),
+        );
+        return;
+      }
+    }
 
     setState(() => _isSubmitting = true);
     try {
@@ -360,6 +394,10 @@ class _ReservationScreenState extends State<ReservationScreen> {
                 _buildCautionItem(s.cautionMaxHours),
                 const SizedBox(height: 3),
                 _buildCautionItem(s.cautionNoProxy),
+                if (_rooms.any((r) => r.id == _kBlockedRoomId)) ...[
+                  const SizedBox(height: 3),
+                  _buildCautionItem(s.shalom125MondayCaution),
+                ],
               ],
             ),
           ),

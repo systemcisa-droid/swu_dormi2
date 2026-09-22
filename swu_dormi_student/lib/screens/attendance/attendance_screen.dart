@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
+import '../../services/server_clock.dart';
 import '../../utils/attendance_strings.dart';
 
 class AttendanceScreen extends StatefulWidget {
@@ -22,6 +23,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? _error;
   String _residentStatus = '재실중';
   bool _residenceInfoMissing = false;
+  // eventId -> 이벤트 문서. 상태 기록에는 isFireDrill이 없어 이벤트 종류를 여기서 판별한다.
+  Map<String, Map<String, dynamic>> _eventMap = {};
 
   static const _blockedStatuses = {'자퇴', '바롬인성교육관'};
 
@@ -73,10 +76,31 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         });
       }
 
+      // 기록이 속한 이벤트 문서를 읽어 종류(화재대피훈련 여부)를 알아낸다.
+      // whereIn은 한 번에 10개까지만 받으므로 나눠서 조회한다.
+      final eventMap = <String, Map<String, dynamic>>{};
+      final eventIds = recordList
+          .map((r) => r['eventId'] as String?)
+          .whereType<String>()
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList();
+      for (var i = 0; i < eventIds.length; i += 10) {
+        final chunk = eventIds.sublist(i, i + 10 > eventIds.length ? eventIds.length : i + 10);
+        final snap = await _firestore
+            .collection('attendance_events')
+            .where(FieldPath.documentId, whereIn: chunk)
+            .get();
+        for (final doc in snap.docs) {
+          eventMap[doc.id] = doc.data();
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _residentStatus = residentStatus;
         _residenceInfoMissing = !_hasValidResidenceInfo(user);
+        _eventMap = eventMap;
         _myRecords = recordList;
         _isLoading = false;
       });
@@ -232,7 +256,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
     } else {
       for (final record in _myRecords) {
-        items.add(_buildRecordItem(record));
+        items.add(_buildRecordItem(record, s));
       }
     }
 
@@ -246,7 +270,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  Widget _buildRecordItem(Map<String, dynamic> data) {
+  Widget _buildRecordItem(Map<String, dynamic> data, AttendanceStrings s) {
     final eventTitle = (data['eventTitle'] ?? '') as String;
     final eventLocation = (data['eventLocation'] ?? '') as String;
     final checkedInAt = (data['checkedInAt'] as Timestamp?)?.toDate();
@@ -255,6 +279,39 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     // 화재대피용(시작→도착 2단계) 레코드 판별: isFireDrill 플래그가 있거나(1차만 확인된 경우도 포함),
     // 도착 확인까지 끝나 arrivalCheckedAt 필드가 채워진 경우(플래그 도입 이전의 과거 데이터 호환).
     final hasArrivalField = data['isFireDrill'] == true || data.containsKey('arrivalCheckedAt');
+    // 이벤트 종류. 상태 기록에는 isFireDrill이 없으므로 이벤트 문서에서 판별한다.
+    final eventId = data['eventId'] as String?;
+    final isFireDrillEvent =
+        hasArrivalField || (eventId != null && _eventMap[eventId]?['isFireDrill'] == true);
+    // 층장/관리자가 불참·외박 등으로 지정한 상태 기록. QR 체크 기록과 같은 컬렉션에
+    // 저장되고 checkedInAt(지정 시각)도 있으므로, 구분하지 않으면 출석한 것처럼 보인다.
+    final isStatusRecord = data['recordType'] == 'status';
+    final adminStatus = data['adminStatus'] as String?;
+    final floorStatus = data['floorStatus'] as String?;
+    String? statusLabel = !isStatusRecord
+        ? null
+        : adminStatus == '외박'
+            ? '외박신청완료'
+            : (floorStatus ?? adminStatus ?? '기타');
+    // '불참'은 이벤트 종료 시 자동으로 남는 값이다. 일반 인원점검(점호)에서 미출석은
+    // 관리 프로그램의 상벌점 규칙과 같이 '외박미신청'으로, 화재대피훈련만 '불참'으로 본다.
+    if (statusLabel == '불참' && !isFireDrillEvent) statusLabel = '외박미신청';
+    final bool isAbsentStatus = statusLabel == '불참' ||
+        statusLabel == '부재' ||
+        statusLabel == '외박미신청' ||
+        statusLabel == '무단퇴사';
+    final bool isOvernightStatus =
+        statusLabel != null && statusLabel.startsWith('외박') && !isAbsentStatus;
+    final Color statusColor = isAbsentStatus
+        ? Colors.red.shade700
+        : isOvernightStatus
+            ? Colors.orange.shade700
+            : Colors.grey.shade700;
+    final Color statusBgColor = isAbsentStatus
+        ? Colors.red.shade50
+        : isOvernightStatus
+            ? Colors.orange.shade50
+            : Colors.grey.shade200;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -270,13 +327,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: isComplete ? Colors.green.shade50 : Colors.orange.shade50,
+              color: statusLabel != null
+                  ? statusBgColor
+                  : isComplete
+                      ? Colors.green.shade50
+                      : Colors.orange.shade50,
               borderRadius: BorderRadius.circular(8),
             ),
             alignment: Alignment.center,
             child: Icon(
-              isComplete ? Icons.check_circle : Icons.hourglass_top,
-              color: isComplete ? Colors.green.shade700 : Colors.orange.shade700,
+              statusLabel != null
+                  ? (isAbsentStatus
+                      ? Icons.cancel
+                      : isOvernightStatus
+                          ? Icons.bedtime_outlined
+                          : Icons.info_outline)
+                  : isComplete
+                      ? Icons.check_circle
+                      : Icons.hourglass_top,
+              color: statusLabel != null
+                  ? statusColor
+                  : isComplete
+                      ? Colors.green.shade700
+                      : Colors.orange.shade700,
               size: 24,
             ),
           ),
@@ -292,23 +365,43 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       child: Text(eventTitle, style: const TextStyle(fontWeight: FontWeight.w600)),
                     ),
                     const SizedBox(width: 6),
+                    // 이벤트 종류 배지 — QR 기록·상태 기록 모두 표시
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: hasArrivalField
+                        color: isFireDrillEvent
                             ? Colors.red.withValues(alpha: 0.1)
                             : Colors.blue.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        hasArrivalField ? '화재대피훈련' : '인원점검',
+                        isFireDrillEvent ? '화재대피훈련' : '인원점검',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: hasArrivalField ? Colors.red.shade700 : Colors.blue.shade700,
+                          color: isFireDrillEvent ? Colors.red.shade700 : Colors.blue.shade700,
                         ),
                       ),
                     ),
+                    // 상태 배지 — 층장/관리자가 지정한 상태 기록에만 표시
+                    if (statusLabel != null) ...[
+                      const SizedBox(width: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: statusBgColor,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          s.recordStatus(statusLabel),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: statusColor,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 const SizedBox(height: 2),
@@ -323,7 +416,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       ],
                     ),
                   ),
-                if (hasArrivalField) ...[
+                if (statusLabel != null) ...[
+                  Text(
+                    _captainLabel(data, s),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  if (checkedInAt != null)
+                    Text(
+                      DateFormat('yyyy.MM.dd HH:mm').format(checkedInAt.toSeoul()),
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                    ),
+                ] else if (hasArrivalField) ...[
                   _buildStageRow(
                     label: '시작',
                     time: checkedInAt,
@@ -337,7 +440,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   ),
                 ] else if (checkedInAt != null)
                   Text(
-                    DateFormat('yyyy.MM.dd HH:mm').format(checkedInAt),
+                    DateFormat('yyyy.MM.dd HH:mm').format(checkedInAt.toSeoul()),
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
                   ),
               ],
@@ -346,6 +449,43 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ],
       ),
     );
+  }
+
+  /// 상태 기록을 남긴 담당 층장의 구역 문구. 기록에는 층장 이메일만 있고 구역이 없으므로
+  /// 기록 당시의 건물·호실에서 구역을 계산한다 (동/층 규칙은 UserModel.building/floor와 동일).
+  /// 예: 샬롬하우스 412호 → "샬롬하우스 A동 4층 층장", 바롬인성교육관 1001-A호 → "바롬인성교육관 10층 층장"
+  String _captainLabel(Map<String, dynamic> data, AttendanceStrings s) {
+    final dorm = (data['dormBuilding'] as String? ?? '').trim();
+    final room = (data['roomNumber'] as String? ?? '').trim();
+    if (dorm.isEmpty || room.isEmpty || room == '000') return s.statusSetByCaptain;
+
+    // 바롬인성교육관은 동 구분이 없고 호실이 '1001-A' 형식이다.
+    if (dorm.startsWith('바롬인성교육관')) {
+      final digits = int.tryParse(RegExp(r'^\d+').firstMatch(room)?.group(0) ?? '');
+      if (digits == null) return s.statusSetByCaptain;
+      return s.captainOf('$dorm ${digits ~/ 100}층');
+    }
+
+    final roomNum = int.tryParse(room);
+    if (roomNum == null) return s.statusSetByCaptain;
+    final floorNum = roomNum ~/ 100;
+    String? wing;
+    if (dorm.startsWith('국제생활관')) {
+      if ((roomNum >= 101 && roomNum <= 132) || (roomNum >= 201 && roomNum <= 229)) {
+        wing = 'A동';
+      } else if ((roomNum >= 233 && roomNum <= 260) || (roomNum >= 301 && roomNum <= 329)) {
+        wing = 'B동';
+      }
+    } else {
+      final lastTwo = roomNum % 100;
+      if (lastTwo >= 1 && lastTwo <= 20) {
+        wing = 'A동';
+      } else if (lastTwo >= 21 && lastTwo <= 35) {
+        wing = 'B동';
+      }
+    }
+    if (wing == null || floorNum < 1) return s.statusSetByCaptain;
+    return s.captainOf('$dorm $wing $floorNum층');
   }
 
   Widget _buildStageRow({required String label, required DateTime? time, required bool done}) {
@@ -368,7 +508,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         if (time != null) ...[
           const SizedBox(width: 6),
           Text(
-            DateFormat('MM.dd HH:mm').format(time),
+            DateFormat('MM.dd HH:mm').format(time.toSeoul()),
             style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
           ),
         ] else

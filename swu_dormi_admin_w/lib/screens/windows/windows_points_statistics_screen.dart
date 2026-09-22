@@ -28,6 +28,9 @@ class _WindowsPointsStatisticsScreenState
   String _reportUnit = 'day'; // 'day' | 'week' | 'month'
   final Set<DateTime> _expandedBuckets = {};
 
+  // 학생별 누적 점수 순위 리스트에서 체크된 학생(uid) 집합.
+  final Set<String> _selectedRankingUids = {};
+
   final _dateFormat = DateFormat('yyyy-MM-dd');
 
   @override
@@ -136,8 +139,97 @@ class _WindowsPointsStatisticsScreenState
     }
   }
 
+  /// 여러 상벌점 이력을 한 번에 삭제하고, 각 학생의 users.points도 되돌린다.
+  /// Firestore batch는 500건 제한이 있어 청크로 나눠 처리한다.
+  Future<void> _deleteHistoryEntries(List<Map<String, dynamic>> entries) async {
+    if (entries.isEmpty) return;
+    final firestore = FirebaseFirestore.instance;
+
+    // uid별 점수 되돌림을 합산해 users 업데이트 횟수를 줄인다.
+    final pointDeltas = <String, int>{};
+    final refs = <DocumentReference>[];
+    for (final entry in entries) {
+      final ref = entry['_ref'] as DocumentReference?;
+      final uid = entry['userId'] as String?;
+      if (ref == null || uid == null) continue;
+      final type = entry['type'] as String? ?? '';
+      final points = (entry['points'] is num) ? (entry['points'] as num).toInt() : 0;
+      final delta = type == 'reward' ? -points : points;
+      pointDeltas[uid] = (pointDeltas[uid] ?? 0) + delta;
+      refs.add(ref);
+    }
+
+    for (var i = 0; i < refs.length; i += 400) {
+      final batch = firestore.batch();
+      for (final ref in refs.skip(i).take(400)) {
+        batch.delete(ref);
+      }
+      await batch.commit();
+    }
+    for (final entry in pointDeltas.entries) {
+      await firestore.collection('users').doc(entry.key).update({
+        'points': FieldValue.increment(entry.value),
+      });
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _history.removeWhere((h) => refs.contains(h['_ref']));
+    });
+  }
+
+  /// 학생별 순위 리스트에서 선택된 학생들의 (현재 필터된 기간 내) 상벌점 이력을
+  /// 모두 삭제한다.
+  Future<void> _deleteSelectedRankingStudents(
+      List<({String uid, String name, String studentId, String roomNumber, String dormBuilding, int reward, int penalty, int net})> rows) async {
+    final selectedRows = rows.where((r) => _selectedRankingUids.contains(r.uid)).toList();
+    if (selectedRows.isEmpty) return;
+
+    final targets =
+        _filteredHistory.where((h) => _selectedRankingUids.contains(h['userId'])).toList();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => ContentDialog(
+        title: const Text('선택 학생 이력 일괄 삭제'),
+        content: Text(
+          '선택한 ${selectedRows.length}명의 상벌점 이력 ${targets.length}건을 모두 삭제하시겠습니까?\n'
+          '(현재 조회 중인 기간 기준) 상점/벌점도 함께 되돌립니다.',
+        ),
+        actions: [
+          Button(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            style: ButtonStyle(backgroundColor: WidgetStateProperty.all(Colors.red)),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _deleteHistoryEntries(targets);
+      if (!mounted) return;
+      setState(() => _selectedRankingUids.clear());
+    } catch (e) {
+      if (!mounted) return;
+      displayInfoBar(context,
+          builder: (ctx, close) => InfoBar(
+                title: const Text('오류'),
+                content: Text('삭제 실패: $e'),
+                severity: InfoBarSeverity.error,
+                action: IconButton(icon: const Icon(FluentIcons.clear), onPressed: close),
+              ));
+    }
+  }
+
   void _showStudentHistoryDialog(String uid, String name, String studentId) {
     final dateTimeFormat = DateFormat('yyyy-MM-dd HH:mm');
+    final selectedRefs = <DocumentReference>{};
 
     showDialog(
       context: context,
@@ -149,6 +241,40 @@ class _WindowsPointsStatisticsScreenState
               final bt = (b['createdAt'] as Timestamp?)?.toDate() ?? DateTime(2000);
               return bt.compareTo(at);
             });
+          // 삭제된 건이 목록에서 빠지면 남은 항목들의 레퍼런스만 선택 상태로 유지한다.
+          final historyRefs = history.map((h) => h['_ref'] as DocumentReference?).toSet();
+          selectedRefs.removeWhere((r) => !historyRefs.contains(r));
+          final allSelected = history.isNotEmpty && selectedRefs.length == history.length;
+
+          Future<void> deleteSelected() async {
+            final targets = history
+                .where((h) => selectedRefs.contains(h['_ref'] as DocumentReference?))
+                .toList();
+            if (targets.isEmpty) return;
+            final confirmed = await showDialog<bool>(
+              context: ctx,
+              builder: (dialogCtx) => ContentDialog(
+                title: const Text('선택 삭제'),
+                content: Text('선택한 ${targets.length}건을 삭제하시겠습니까?\n상점/벌점도 함께 되돌립니다.'),
+                actions: [
+                  Button(
+                    onPressed: () => Navigator.pop(dialogCtx, false),
+                    child: const Text('취소'),
+                  ),
+                  FilledButton(
+                    style: ButtonStyle(
+                        backgroundColor: WidgetStateProperty.all(Colors.red)),
+                    onPressed: () => Navigator.pop(dialogCtx, true),
+                    child: const Text('삭제'),
+                  ),
+                ],
+              ),
+            );
+            if (confirmed != true) return;
+            await _deleteHistoryEntries(targets);
+            selectedRefs.clear();
+            setDialogState(() {});
+          }
 
           return ContentDialog(
             constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
@@ -161,66 +287,128 @@ class _WindowsPointsStatisticsScreenState
                       child: Text('해당 기간 이력이 없습니다',
                           style: TextStyle(fontSize: 14, color: Colors.grey[120])),
                     )
-                  : ListView.separated(
-                      itemCount: history.length,
-                      separatorBuilder: (context, index) => const Divider(),
-                      itemBuilder: (ctx, i) {
-                        final h = history[i];
-                        final type = h['type'] as String? ?? '';
-                        final isReward = type == 'reward';
-                        final points = (h['points'] is num) ? (h['points'] as num).toInt() : 0;
-                        final reason = h['reason'] as String? ?? '';
-                        final createdAt = (h['createdAt'] as Timestamp?)?.toDate();
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                decoration: BoxDecoration(
-                                  color: (isReward ? Colors.green : Colors.red).withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(4),
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Checkbox(
+                              checked: allSelected,
+                              onChanged: (v) => setDialogState(() {
+                                if (v == true) {
+                                  selectedRefs
+                                    ..clear()
+                                    ..addAll(historyRefs.whereType<DocumentReference>());
+                                } else {
+                                  selectedRefs.clear();
+                                }
+                              }),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              selectedRefs.isEmpty
+                                  ? '전체 ${history.length}건'
+                                  : '${selectedRefs.length}건 선택',
+                              style: TextStyle(fontSize: 12, color: Colors.grey[100]),
+                            ),
+                            const Spacer(),
+                            SizedBox(
+                              height: 26,
+                              child: Button(
+                                style: ButtonStyle(
+                                  backgroundColor: WidgetStateProperty.all(
+                                      Colors.red.withValues(alpha: 0.1)),
                                 ),
-                                child: Text(
-                                  isReward ? '+$points' : '-$points',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                    color: isReward ? Colors.green : Colors.red,
-                                  ),
-                                ),
+                                onPressed: selectedRefs.isEmpty ? null : deleteSelected,
+                                child: const Text('선택 삭제', style: TextStyle(fontSize: 11)),
                               ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
+                            ),
+                          ],
+                        ),
+                        const Divider(),
+                        Expanded(
+                          child: ListView.separated(
+                            itemCount: history.length,
+                            separatorBuilder: (context, index) => const Divider(),
+                            itemBuilder: (ctx, i) {
+                              final h = history[i];
+                              final ref = h['_ref'] as DocumentReference?;
+                              final type = h['type'] as String? ?? '';
+                              final isReward = type == 'reward';
+                              final points =
+                                  (h['points'] is num) ? (h['points'] as num).toInt() : 0;
+                              final reason = h['reason'] as String? ?? '';
+                              final createdAt = (h['createdAt'] as Timestamp?)?.toDate();
+                              final isSelected = ref != null && selectedRefs.contains(ref);
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(reason, style: const TextStyle(fontSize: 13)),
-                                    if (createdAt != null) ...[
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        dateTimeFormat.format(createdAt),
-                                        style: TextStyle(fontSize: 11, color: Colors.grey[100]),
+                                    Checkbox(
+                                      checked: isSelected,
+                                      onChanged: ref == null
+                                          ? null
+                                          : (v) => setDialogState(() {
+                                                if (v == true) {
+                                                  selectedRefs.add(ref);
+                                                } else {
+                                                  selectedRefs.remove(ref);
+                                                }
+                                              }),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: (isReward ? Colors.green : Colors.red)
+                                            .withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(4),
                                       ),
-                                    ],
+                                      child: Text(
+                                        isReward ? '+$points' : '-$points',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold,
+                                          color: isReward ? Colors.green : Colors.red,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(reason, style: const TextStyle(fontSize: 13)),
+                                          if (createdAt != null) ...[
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              dateTimeFormat.format(createdAt),
+                                              style: TextStyle(
+                                                  fontSize: 11, color: Colors.grey[100]),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    SizedBox(
+                                      width: 32,
+                                      child: IconButton(
+                                        icon: const Icon(FluentIcons.delete, size: 14),
+                                        onPressed: () async {
+                                          await _deleteHistoryEntry(h);
+                                          setDialogState(() {});
+                                        },
+                                      ),
+                                    ),
                                   ],
                                 ),
-                              ),
-                              SizedBox(
-                                width: 32,
-                                child: IconButton(
-                                  icon: const Icon(FluentIcons.delete, size: 14),
-                                  onPressed: () async {
-                                    await _deleteHistoryEntry(h);
-                                    setDialogState(() {});
-                                  },
-                                ),
-                              ),
-                            ],
+                              );
+                            },
                           ),
-                        );
-                      },
+                        ),
+                      ],
                     ),
             ),
             actions: [
@@ -444,6 +632,23 @@ class _WindowsPointsStatisticsScreenState
                 const Text('학생별 누적 점수 순위',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const Spacer(),
+                if (_selectedRankingUids.isNotEmpty) ...[
+                  Text('${_selectedRankingUids.length}명 선택',
+                      style: TextStyle(fontSize: 12, color: Colors.grey[100])),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    height: 26,
+                    child: Button(
+                      style: ButtonStyle(
+                        backgroundColor:
+                            WidgetStateProperty.all(Colors.red.withValues(alpha: 0.1)),
+                      ),
+                      onPressed: () => _deleteSelectedRankingStudents(rows),
+                      child: const Text('선택 삭제', style: TextStyle(fontSize: 11)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                ],
                 Text('${rows.length}명',
                     style: TextStyle(fontSize: 12, color: Colors.grey[100])),
               ],
@@ -463,9 +668,25 @@ class _WindowsPointsStatisticsScreenState
                 color: Colors.grey.withValues(alpha: 0.1),
                 child: Row(
                   children: [
+                    SizedBox(
+                      width: 36,
+                      child: Checkbox(
+                        checked: rows.isNotEmpty &&
+                            _selectedRankingUids.length == rows.length,
+                        onChanged: (v) => setState(() {
+                          if (v == true) {
+                            _selectedRankingUids
+                              ..clear()
+                              ..addAll(rows.map((r) => r.uid));
+                          } else {
+                            _selectedRankingUids.clear();
+                          }
+                        }),
+                      ),
+                    ),
                     const SizedBox(width: 36, child: Text('순위', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 90, child: Text('학번', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 70, child: Text('성명', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: 210, child: Text('성명', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                     const Expanded(child: Text('호실', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 60, child: Text('상점', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                     const SizedBox(width: 60, child: Text('벌점', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
@@ -485,18 +706,34 @@ class _WindowsPointsStatisticsScreenState
                         : r.net > 0
                             ? Colors.green
                             : Colors.grey;
+                    final isSelected = _selectedRankingUids.contains(r.uid);
                     return HoverButton(
                       onPressed: () => _showStudentHistoryDialog(r.uid, r.name, r.studentId),
                       builder: (ctx, states) => Container(
-                        color: states.isHovered
-                            ? Colors.grey.withValues(alpha: 0.08)
-                            : Colors.transparent,
+                        color: isSelected
+                            ? Colors.blue.withValues(alpha: 0.08)
+                            : states.isHovered
+                                ? Colors.grey.withValues(alpha: 0.08)
+                                : Colors.transparent,
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         child: Row(
                           children: [
+                            SizedBox(
+                              width: 36,
+                              child: Checkbox(
+                                checked: isSelected,
+                                onChanged: (v) => setState(() {
+                                  if (v == true) {
+                                    _selectedRankingUids.add(r.uid);
+                                  } else {
+                                    _selectedRankingUids.remove(r.uid);
+                                  }
+                                }),
+                              ),
+                            ),
                             SizedBox(width: 36, child: Text('${i + 1}', style: const TextStyle(fontSize: 13))),
                             SizedBox(width: 90, child: Text(r.studentId, style: const TextStyle(fontSize: 13))),
-                            SizedBox(width: 70, child: Text(r.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+                            SizedBox(width: 210, child: Text(r.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
                             Expanded(
                               child: Text(
                                 r.roomNumber.isNotEmpty ? '${r.dormBuilding} ${r.roomNumber}호' : '-',

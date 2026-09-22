@@ -1,6 +1,7 @@
 ﻿import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 import 'package:video_player/video_player.dart';
@@ -62,7 +63,7 @@ class _FacilitiesManagementScreenState
   String? _selectedCategory;
 
   static const _floorOptions = [
-    '샬롬하우스 A동 2층', '샬롬하우스 A동 3층', '샬롬하우스 A동 4층',
+    '샬롬하우스 A동 1층', '샬롬하우스 A동 2층', '샬롬하우스 A동 3층', '샬롬하우스 A동 4층',
     '샬롬하우스 A동 5층', '샬롬하우스 A동 6층', '샬롬하우스 A동 7층',
     '샬롬하우스 B동 2층', '샬롬하우스 B동 3층', '샬롬하우스 B동 4층',
     '샬롬하우스 B동 5층', '샬롬하우스 B동 6층', '샬롬하우스 B동 7층',
@@ -74,7 +75,20 @@ class _FacilitiesManagementScreenState
   @override
   void initState() {
     super.initState();
+    _loadAssignedFloor();
+  }
 
+  /// 점검구역 기본값을 로그인한 층장의 담당구역으로 맞춘다.
+  Future<void> _loadAssignedFloor() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final assignedFloor = doc.data()?['assignedFloor'] as String?;
+      if (mounted && assignedFloor != null && _floorOptions.contains(assignedFloor)) {
+        setState(() => _selectedFloor = assignedFloor);
+      }
+    } catch (_) {}
   }
 
   /// 신고에 등장하는 사용자의 기숙사 정보만 조회한다.
@@ -165,6 +179,7 @@ class _FacilitiesManagementScreenState
                           DropdownMenuItem<String?>(value: null, child: Text('전체', style: TextStyle(fontSize: 13))),
                           DropdownMenuItem<String?>(value: 'pending', child: Text('대기중', style: TextStyle(fontSize: 13))),
                           DropdownMenuItem<String?>(value: 'in_progress', child: Text('처리중', style: TextStyle(fontSize: 13))),
+                          DropdownMenuItem<String?>(value: 'pending_in_progress', child: Text('대기중+처리중', style: TextStyle(fontSize: 13))),
                           DropdownMenuItem<String?>(value: 'completed', child: Text('완료됨', style: TextStyle(fontSize: 13))),
                         ],
                         onChanged: (val) => setState(() => _selectedStatus = val),
@@ -223,7 +238,7 @@ class _FacilitiesManagementScreenState
 ///
 /// 국제생활관은 호실 번호만으로 동이 정해지므로 저장된 building 값이
 /// '미배정'이어도 여기서 올바른 동을 구할 수 있다.
-/// '(겨울방학)' 은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 동일하다.
+/// '(방학)' 은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 동일하다.
 String? _wingFromRoom(String dormBuilding, String roomNumber) {
   final room = int.tryParse(roomNumber) ?? 0;
   if (room == 0) return null;
@@ -249,12 +264,12 @@ String? _floorFromReport(FacilityReportModel report, Map<String, String> dormBui
   final room = int.tryParse(report.roomNumber) ?? 0;
   if (room == 0 || building.isEmpty) return null;
 
-  if (building == '샬롬하우스' || building == '샬롬하우스(겨울방학)') {
+  if (building == '샬롬하우스' || building == '샬롬하우스(방학)') {
     final floorNum = room ~/ 100;
     final roomInFloor = room % 100;
     if (roomInFloor >= 1 && roomInFloor <= 20) return '$building A동 $floorNum층';
     if (roomInFloor >= 21 && roomInFloor <= 35) return '$building B동 $floorNum층';
-  } else if (building == '국제생활관' || building == '국제생활관(겨울방학)') {
+  } else if (building == '국제생활관' || building == '국제생활관(방학)') {
     if (room >= 101 && room <= 132) return '$building A동 1층';
     if (room >= 201 && room <= 229) return '$building A동 2층';
     if (room >= 233 && room <= 260) return '$building B동 2층';
@@ -298,14 +313,24 @@ class _ReportListState extends State<_ReportList> {
   @override
   void initState() {
     super.initState();
-    _stream = widget.service.getRepairReports(status: widget.status);
+    _stream = _streamFor(widget.status);
+  }
+
+  /// '대기중+처리중' 은 실제 status 값이 아니라 화면 전용 묶음 필터이므로
+  /// Firestore whereIn 조회로 변환한다.
+  Stream<QuerySnapshot> _streamFor(String? status) {
+    if (status == 'pending_in_progress') {
+      return widget.service
+          .getRepairReports(statuses: const ['pending', 'in_progress']);
+    }
+    return widget.service.getRepairReports(status: status);
   }
 
   @override
   void didUpdateWidget(_ReportList oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.status != widget.status) {
-      _stream = widget.service.getRepairReports(status: widget.status);
+      _stream = _streamFor(widget.status);
     }
   }
 

@@ -198,8 +198,9 @@ class FirestoreService {
   Future<void> updateFacilityReportStatus(
     String reportId,
     String status,
-    String? technicianNote,
-  ) async {
+    String? technicianNote, {
+    String? category,
+  }) async {
     try {
       // 현재 로그인한 관리자 정보 가져오기
       final currentUser = _auth.currentUser;
@@ -233,6 +234,11 @@ class FirestoreService {
         'processedBy': currentUser?.uid,
         'processedByName': adminEmail ?? '관리자',
       };
+
+      // 관리자가 신고 분류를 정정한 경우에만 반영한다.
+      if (category != null) {
+        data['category'] = category;
+      }
 
       if (status == 'completed') {
         data['completedAt'] = FieldValue.serverTimestamp();

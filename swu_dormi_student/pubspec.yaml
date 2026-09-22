@@ -60,7 +60,7 @@ dependencies:
   video_compress: ^3.1.2
   shared_preferences: ^2.3.3
   vibration: ^2.0.1
-  fluttertoast: ^8.2.8
+  fluttertoast: ^10.0.0
   syncfusion_flutter_pdfviewer: ^28.1.33
   signature: ^5.5.0
   mobile_scanner: ^7.1.4

@@ -33,7 +33,8 @@ class _WindowsAttendanceHistoryScreenState
 
   String _searchQuery = '';
   String? _selectedKey;
-  String? _floorFilter;
+  // 기본 구역 필터는 전체가 아니라 샬롬하우스 A동 2층으로 시작한다.
+  String? _floorFilter = '샬롬하우스 A동 2층';
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -123,10 +124,11 @@ class _WindowsAttendanceHistoryScreenState
           if (bo != 0) return bo;
           final roomA = a.split('|').length > 1 ? a.split('|')[1] : '';
           final roomB = b.split('|').length > 1 ? b.split('|')[1] : '';
-          final numA = int.tryParse(roomA) ?? 0;
-          final numB = int.tryParse(roomB) ?? 0;
+          // 바롬 '1001-A' 형식도 '-' 앞 숫자로 비교
+          final numA = int.tryParse(roomA.split('-').first) ?? 0;
+          final numB = int.tryParse(roomB.split('-').first) ?? 0;
           if (numA != numB) return numA.compareTo(numB);
-          return a.compareTo(b);
+          return roomA.compareTo(roomB);
         });
 
       if (!mounted) return;
@@ -162,7 +164,7 @@ class _WindowsAttendanceHistoryScreenState
       final excel = Excel.createExcel();
       final sheet = excel['출석체크이력'];
 
-      final headers = ['건물', '호실', '이름', '학번', '이벤트', '상태', '체크시각', '처리자'];
+      final headers = ['건물', '호실', '이름', '학번', '이벤트', '상태', '체크시각1', '체크시각2', '처리자'];
       for (int c = 0; c < headers.length; c++) {
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0)).value =
             TextCellValue(headers[c]);
@@ -177,6 +179,18 @@ class _WindowsAttendanceHistoryScreenState
         final studentId = (info['studentId'] as String?) ?? '';
         final records = _grouped[key] ?? [];
 
+        // 이 기간 동안 출석 기록이 하나도 없는 학생도 목록 화면과 마찬가지로
+        // '기록 없음' 한 행으로 포함시킨다.
+        if (records.isEmpty) {
+          final values = [dorm, room, name, studentId, '', '기록 없음', '', '', ''];
+          for (int c = 0; c < values.length; c++) {
+            sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: rowIdx)).value =
+                TextCellValue(values[c]);
+          }
+          rowIdx++;
+          continue;
+        }
+
         for (final rec in records) {
           final data = rec.data() as Map<String, dynamic>;
           final eventId = data['eventId'] as String?;
@@ -184,11 +198,16 @@ class _WindowsAttendanceHistoryScreenState
           final eventTitle =
               (event?['title'] as String?) ?? (data['eventTitle'] as String?) ?? '출석체크';
           final checkedInAt = (data['checkedInAt'] as Timestamp?)?.toDate();
+          final arrivalCheckedAt = (data['arrivalCheckedAt'] as Timestamp?)?.toDate();
           final isStatusRecord = data['recordType'] == 'status';
           final adminStatus = data['adminStatus'] as String?;
           final floorStatus = data['floorStatus'] as String?;
           final floorStatusSetBy = data['floorStatusSetBy'] as String?;
-          final isFireDrillEvent = event?['isFireDrill'] == true;
+          // 이벤트 문서가 삭제되어 _eventMap에 없어도(예: 테스트 후 정리된 이벤트) 레코드 자체의
+          // isFireDrill 필드나 arrivalCheckedAt 존재 여부로 화재대피훈련 기록임을 판별한다.
+          final isFireDrillEvent = event?['isFireDrill'] == true ||
+              data['isFireDrill'] == true ||
+              arrivalCheckedAt != null;
           final isComplete = data['isComplete'] != false;
 
           final String primaryStatus;
@@ -202,6 +221,8 @@ class _WindowsAttendanceHistoryScreenState
             primaryStatus = '재실확인';
           }
 
+          // 일반 인원점검은 체크시각1(checkedInAt)만 있으면 되지만, 화재대피훈련은
+          // 1차(checkedInAt)와 2차(arrivalCheckedAt)를 각각 체크시각1/2에 나눠 표시한다.
           final values = [
             dorm,
             room,
@@ -210,6 +231,9 @@ class _WindowsAttendanceHistoryScreenState
             eventTitle,
             primaryStatus,
             checkedInAt != null ? DateFormat('yyyy.MM.dd HH:mm').format(checkedInAt) : '',
+            isFireDrillEvent && arrivalCheckedAt != null
+                ? DateFormat('yyyy.MM.dd HH:mm').format(arrivalCheckedAt)
+                : '',
             floorStatusSetBy ?? '',
           ];
           for (int c = 0; c < values.length; c++) {
@@ -263,12 +287,14 @@ class _WindowsAttendanceHistoryScreenState
 
   static String _floorLabelFor(String dorm, String room) {
     if (dorm.isEmpty || room.isEmpty) return '';
-    final n = int.tryParse(room);
-    if (n == null) return dorm;
     if (dorm == '바롬인성교육관') {
-      final floor = room.length >= 4 ? room.substring(0, 2) : room.substring(0, 1);
+      // 바롬 호실은 '1001-A' 형식 → '-' 앞 숫자의 앞 두 자리가 층
+      final base = room.split('-').first;
+      final floor = base.length >= 4 ? base.substring(0, 2) : base.substring(0, 1);
       return '$dorm $floor층';
     }
+    final n = int.tryParse(room);
+    if (n == null) return dorm;
     final lastTwo = n % 100;
     final wing = (lastTwo >= 1 && lastTwo <= 20)
         ? 'A동'
@@ -665,6 +691,7 @@ class _WindowsAttendanceHistoryScreenState
     '화재대피훈련불참': FluentIcons.cancel,
     '부재': FluentIcons.contact_card,
     '외박미수정': FluentIcons.warning,
+    '불참': FluentIcons.cancel,
   };
   static const _statusColors = {
     '재실확인': Color(0xFF4CAF50),
@@ -674,6 +701,7 @@ class _WindowsAttendanceHistoryScreenState
     '화재대피훈련불참': Color(0xFFF44336),
     '부재': Color(0xFFF44336),
     '외박미수정': Color(0xFF2196F3),
+    '불참': Color(0xFFF44336),
   };
 
   Widget _buildHistoryCard(Map<String, dynamic> data) {
@@ -681,11 +709,16 @@ class _WindowsAttendanceHistoryScreenState
     final event = eventId != null ? _eventMap[eventId] : null;
     final eventTitle = (event?['title'] as String?) ?? (data['eventTitle'] as String?) ?? '출석체크';
     final checkedInAt = (data['checkedInAt'] as Timestamp?)?.toDate();
+    final arrivalCheckedAt = (data['arrivalCheckedAt'] as Timestamp?)?.toDate();
     final isStatusRecord = data['recordType'] == 'status';
     final adminStatus = data['adminStatus'] as String?;
     final floorStatus = data['floorStatus'] as String?;
     final floorStatusSetBy = data['floorStatusSetBy'] as String?;
-    final isFireDrillEvent = event?['isFireDrill'] == true;
+    // 이벤트 문서가 삭제되어 _eventMap에 없어도 레코드 자체의 isFireDrill 필드나
+    // arrivalCheckedAt 존재 여부로 화재대피훈련 기록임을 판별한다.
+    final isFireDrillEvent = event?['isFireDrill'] == true ||
+        data['isFireDrill'] == true ||
+        arrivalCheckedAt != null;
     final isComplete = data['isComplete'] != false;
 
     final String primaryStatus;

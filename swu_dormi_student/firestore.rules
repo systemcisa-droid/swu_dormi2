@@ -16,6 +16,15 @@ service cloud.firestore {
              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'admin_m'];
     }
 
+    // 캠페인 좋아요 검증: 본인 uid만 likes에 추가/제거할 수 있고, likeCount는 likes 개수와 같아야 한다.
+    function isOwnLikeChange() {
+      let before = resource.data.get('likes', []).toSet();
+      let after = request.resource.data.likes.toSet();
+      return request.resource.data.likeCount == after.size() &&
+             after.difference(before).hasOnly([request.auth.uid]) &&
+             before.difference(after).hasOnly([request.auth.uid]);
+    }
+
     // Users collection
     match /users/{userId} {
       allow read: if isSignedIn();
@@ -41,6 +50,15 @@ service cloud.firestore {
       allow create: if isSignedIn() && request.resource.data.uid == request.auth.uid;
       allow delete: if isAdmin() || (isSignedIn() && resource.data.uid == request.auth.uid);
       allow update: if false;
+    }
+
+    // Student roster (사생 기본 정보 엑셀의 학번 명단, 문서ID = studentId, 내용은 갱신시각뿐)
+    // 윈도우 관리프로그램이 엑셀 업로드 시 갱신하고, 학생앱은 회원가입 시 "명단에 있는 학번인지"를
+    // 미인증 상태에서도 확인해야 하므로 문서 존재 여부(get)만 공개한다. '_meta' 문서는 count/updatedAt.
+    match /student_roster/{studentId} {
+      allow get: if true;
+      allow list: if isAdmin();
+      allow write: if isAdmin();
     }
 
     // 상벌점 이력 collectionGroup 쿼리 (관리자 앱 상벌 통계 페이지용)
@@ -77,6 +95,7 @@ service cloud.firestore {
                       (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewedUsers'])) ||
                       // 댓글수
                       (isSignedIn() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['commentCount']));
+      allow delete: if isAdmin() || isOwner(resource.data.authorId);
       allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
     }
 
@@ -94,7 +113,11 @@ service cloud.firestore {
       allow create: if isSignedIn();
       // 작성자만 댓글 수정 가능
       allow update: if isOwner(resource.data.authorId);
-      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+      // 댓글 작성자·관리자 외에, 게시글 작성자는 글을 지울 때 딸린 댓글도 지울 수 있어야 한다.
+      allow delete: if isAdmin() ||
+                      (isSignedIn() && resource.data.authorId == request.auth.uid) ||
+                      (isSignedIn() &&
+                        get(/databases/$(database)/documents/board_posts/$(resource.data.postId)).data.authorId == request.auth.uid);
     }
 
     // Notices collection
@@ -102,11 +125,23 @@ service cloud.firestore {
     // 학생은 읽기만, 작성은 관리자만 가능하다.
     match /council_notices/{docId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      // 조회수 (계정당 1회: viewedUsers에 본인 uid 추가 + viewCount 증가만 허용)
+      allow update: if isAdmin() ||
+                      (isSignedIn() &&
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewedUsers']));
     }
     match /council_campaigns/{docId} {
       allow read: if isSignedIn();
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() ||
+                      (isSignedIn() && (
+                        // 조회수 (계정당 1회: viewedUsers에 본인 uid 추가 + viewCount 증가만 허용)
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewedUsers']) ||
+                        // 좋아요 (likes/likeCount만 변경, 본인 uid만 추가·제거, likeCount는 likes 개수와 일치)
+                        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'likeCount']) &&
+                         isOwnLikeChange())
+                      ));
     }
     match /council_elections/{docId} {
       allow read: if isSignedIn();

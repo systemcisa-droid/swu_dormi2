@@ -44,6 +44,31 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadStats();
   }
 
+  /// 호실 번호로 동(A동/B동)을 계산한다. 저장된 building 필드('미배정' 등)를 믿지 않는다.
+  /// 국제생활관: 101~132·201~229 = A동 / 233~260·301~329 = B동
+  /// 샬롬하우스: 층내 01~20 = A동 / 21~35 = B동
+  static String? _wingFromRoom(String dormBuilding, int roomNum) {
+    if (roomNum == 0) return null;
+    if (dormBuilding.startsWith('국제생활관')) {
+      if ((roomNum >= 101 && roomNum <= 132) ||
+          (roomNum >= 201 && roomNum <= 229)) {
+        return 'A동';
+      }
+      if ((roomNum >= 233 && roomNum <= 260) ||
+          (roomNum >= 301 && roomNum <= 329)) {
+        return 'B동';
+      }
+      return null;
+    }
+    if (dormBuilding.startsWith('샬롬하우스')) {
+      final last = roomNum % 100;
+      if (last >= 1 && last <= 20) return 'A동';
+      if (last >= 21 && last <= 35) return 'B동';
+      return null;
+    }
+    return null;
+  }
+
   Future<void> _loadStats() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
@@ -147,12 +172,12 @@ class _HomeScreenState extends State<HomeScreen> {
       final wingMatch = RegExp(r'[A-Z]동').firstMatch(assignedFloor);
       final floorMatch = RegExp(r'(\d+)층').firstMatch(assignedFloor);
       String dormBuilding;
-      if (assignedFloor.startsWith('샬롬하우스(겨울방학)')) {
-        dormBuilding = '샬롬하우스(겨울방학)';
+      if (assignedFloor.startsWith('샬롬하우스(방학)')) {
+        dormBuilding = '샬롬하우스(방학)';
       } else if (assignedFloor.startsWith('샬롬하우스')) {
         dormBuilding = '샬롬하우스';
-      } else if (assignedFloor.startsWith('국제생활관(겨울방학)')) {
-        dormBuilding = '국제생활관(겨울방학)';
+      } else if (assignedFloor.startsWith('국제생활관(방학)')) {
+        dormBuilding = '국제생활관(방학)';
       } else if (assignedFloor.startsWith('국제생활관')) {
         dormBuilding = '국제생활관';
       } else if (assignedFloor.startsWith('바롬인성교육관')) {
@@ -162,20 +187,29 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       final building = wingMatch?.group(0) ?? '';
       final floorNum = floorMatch != null ? int.tryParse(floorMatch.group(1)!) ?? 0 : 0;
-      if (building.isEmpty || floorNum == 0) return empty;
+      // 바롬인성교육관은 동(wing) 구분이 없으므로 building이 비어 있어도 유효하다.
+      final isBarom = dormBuilding == '바롬인성교육관';
+      if ((!isBarom && building.isEmpty) || floorNum == 0) return empty;
 
+      // building 필드('미배정' 가능) 대신 호실 번호로 동/층을 판정한다.
       final usersSnap = await FirebaseFirestore.instance
           .collection('users')
           .where('dormBuilding', isEqualTo: dormBuilding)
-          .where('building', isEqualTo: building)
           .get();
 
       final floorUids = <String>{};
       for (final doc in usersSnap.docs) {
         final room = doc.data()['roomNumber'] as String? ?? '';
-        if ((int.tryParse(room) ?? 0) ~/ 100 == floorNum) {
-          floorUids.add(doc.id);
+        if (isBarom) {
+          // 바롬인성교육관 호실: '1001-A' 형식. '-' 앞 숫자의 층(1001~1003 → 10층)으로 판정.
+          final base = int.tryParse(room.split('-').first) ?? 0;
+          if (base ~/ 100 != floorNum) continue;
+        } else {
+          final roomNum = int.tryParse(room) ?? 0;
+          if (roomNum ~/ 100 != floorNum) continue;
+          if (_wingFromRoom(dormBuilding, roomNum) != building) continue;
         }
+        floorUids.add(doc.id);
       }
       if (floorUids.isEmpty) return empty;
 
@@ -206,12 +240,12 @@ class _HomeScreenState extends State<HomeScreen> {
       final wingMatch = RegExp(r'[A-Z]동').firstMatch(assignedFloor);
       final floorMatch = RegExp(r'(\d+)층').firstMatch(assignedFloor);
       String dormBuilding;
-      if (assignedFloor.startsWith('샬롬하우스(겨울방학)')) {
-        dormBuilding = '샬롬하우스(겨울방학)';
+      if (assignedFloor.startsWith('샬롬하우스(방학)')) {
+        dormBuilding = '샬롬하우스(방학)';
       } else if (assignedFloor.startsWith('샬롬하우스')) {
         dormBuilding = '샬롬하우스';
-      } else if (assignedFloor.startsWith('국제생활관(겨울방학)')) {
-        dormBuilding = '국제생활관(겨울방학)';
+      } else if (assignedFloor.startsWith('국제생활관(방학)')) {
+        dormBuilding = '국제생활관(방학)';
       } else if (assignedFloor.startsWith('국제생활관')) {
         dormBuilding = '국제생활관';
       } else if (assignedFloor.startsWith('바롬인성교육관')) {
@@ -221,13 +255,16 @@ class _HomeScreenState extends State<HomeScreen> {
       }
       final building = wingMatch?.group(0) ?? '';
       final floorNum = floorMatch != null ? int.tryParse(floorMatch.group(1)!) ?? 0 : 0;
-      if (building.isEmpty || floorNum == 0) return empty;
+      // 바롬인성교육관은 동(wing) 구분이 없으므로 building이 비어 있어도 유효하다.
+      final isBarom = dormBuilding == '바롬인성교육관';
+      if ((!isBarom && building.isEmpty) || floorNum == 0) return empty;
 
       // 1. 재실중 학생 수 계산 (users 컬렉션)
+      // building 필드는 '미배정'으로 저장된 경우가 있어 쿼리에 쓰지 않고,
+      // dormBuilding 으로만 조회한 뒤 호실 번호로 동/층을 직접 판정한다.
       final usersSnap = await FirebaseFirestore.instance
           .collection('users')
           .where('dormBuilding', isEqualTo: dormBuilding)
-          .where('building', isEqualTo: building)
           .get();
 
       int student = 0;
@@ -236,7 +273,15 @@ class _HomeScreenState extends State<HomeScreen> {
         final data = doc.data();
         if ((data['role'] as String? ?? '') != 'student') continue;
         final room = data['roomNumber'] as String? ?? '';
-        if ((int.tryParse(room) ?? 0) ~/ 100 != floorNum) continue;
+        if (isBarom) {
+          // 바롬인성교육관 호실: '1001-A' 형식. '-' 앞 숫자의 층(1001~1003 → 10층)으로 판정.
+          final base = int.tryParse(room.split('-').first) ?? 0;
+          if (base ~/ 100 != floorNum) continue;
+        } else {
+          final roomNum = int.tryParse(room) ?? 0;
+          if (roomNum ~/ 100 != floorNum) continue;
+          if (_wingFromRoom(dormBuilding, roomNum) != building) continue;
+        }
         final residentStatus = data['residentStatus'] as String? ?? '재실중';
         if (residentStatus != '재실중') continue;
         student++;
@@ -294,32 +339,39 @@ class _HomeScreenState extends State<HomeScreen> {
                 final rowDorm = cell(dormIdx);
                 final rowRoom = cell(roomIdx);
                 if (!rowDorm.contains(dormBuilding)) continue;
-                final roomNum = int.tryParse(rowRoom) ?? 0;
-                if (roomNum ~/ 100 != floorNum) continue;
-                // 동(A동/B동) 판정
-                // 국제생활관은 호실 구간, 샬롬하우스는 끝 두 자리로 구분한다.
-                String rowWing;
-                if (dormBuilding.startsWith('국제생활관')) {
-                  if ((roomNum >= 101 && roomNum <= 132) ||
-                      (roomNum >= 201 && roomNum <= 229)) {
-                    rowWing = 'A동';
-                  } else if ((roomNum >= 233 && roomNum <= 260) ||
-                      (roomNum >= 301 && roomNum <= 329)) {
-                    rowWing = 'B동';
-                  } else {
-                    rowWing = '';
-                  }
+
+                if (isBarom) {
+                  // 바롬인성교육관 호실: '1001-A' 형식. '-' 앞 숫자의 층으로 판정.
+                  final base = int.tryParse(rowRoom.split('-').first) ?? 0;
+                  if (base ~/ 100 != floorNum) continue;
                 } else {
-                  final last = roomNum % 100;
-                  if (last >= 1 && last <= 20) {
-                    rowWing = 'A동';
-                  } else if (last >= 21 && last <= 35) {
-                    rowWing = 'B동';
+                  final roomNum = int.tryParse(rowRoom) ?? 0;
+                  if (roomNum ~/ 100 != floorNum) continue;
+                  // 동(A동/B동) 판정
+                  // 국제생활관은 호실 구간, 샬롬하우스는 끝 두 자리로 구분한다.
+                  String rowWing;
+                  if (dormBuilding.startsWith('국제생활관')) {
+                    if ((roomNum >= 101 && roomNum <= 132) ||
+                        (roomNum >= 201 && roomNum <= 229)) {
+                      rowWing = 'A동';
+                    } else if ((roomNum >= 233 && roomNum <= 260) ||
+                        (roomNum >= 301 && roomNum <= 329)) {
+                      rowWing = 'B동';
+                    } else {
+                      rowWing = '';
+                    }
                   } else {
-                    rowWing = '';
+                    final last = roomNum % 100;
+                    if (last >= 1 && last <= 20) {
+                      rowWing = 'A동';
+                    } else if (last >= 21 && last <= 35) {
+                      rowWing = 'B동';
+                    } else {
+                      rowWing = '';
+                    }
                   }
+                  if (rowWing != building) continue;
                 }
-                if (rowWing != building) continue;
 
                 // 이메일이 가입자 목록에 없으면 미가입
                 final rowEmail = cell(emailIdx).toLowerCase();

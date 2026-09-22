@@ -64,6 +64,34 @@ class DatabaseService {
     }
   }
 
+  Future<void> incrementCampaignViewCount(String campaignId, String userId) async {
+    try {
+      await _incrementViewCount('council_campaigns', campaignId, userId);
+    } catch (e) {
+      debugPrint('캠페인 조회수 증가 실패: $e');
+    }
+  }
+
+  /// 캠페인 좋아요 설정/해제. 게시판과 같은 방식(likes 배열 + likeCount)으로 저장한다.
+  /// 보안 규칙이 likeCount == likes 개수, 본인 uid만 변경 가능함을 검사하므로
+  /// 이미 눌렀는데 또 누르는 식의 중복 요청은 거부된다 (호출부에서 현재 상태를 넘긴다).
+  Future<void> setCampaignLike(String campaignId, String userId, bool like) {
+    return _firestore.collection('council_campaigns').doc(campaignId).update({
+      'likes': like
+          ? FieldValue.arrayUnion([userId])
+          : FieldValue.arrayRemove([userId]),
+      'likeCount': FieldValue.increment(like ? 1 : -1),
+    });
+  }
+
+  Future<void> incrementCouncilNoticeViewCount(String noticeId, String userId) async {
+    try {
+      await _incrementViewCount('council_notices', noticeId, userId);
+    } catch (e) {
+      debugPrint('사생회 공지 조회수 증가 실패: $e');
+    }
+  }
+
   // ===== Room Assignment Methods =====
 
   Future<RoomAssignmentModel?> getUserRoomAssignment(String userId) async {

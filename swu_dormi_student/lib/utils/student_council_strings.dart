@@ -76,6 +76,13 @@ class StudentCouncilStrings {
   String get electionPoster => _t('선거 포스터', 'Election Poster');
   String get electionPosterOpen => _t('선거 포스터 보기', 'View election poster');
 
+  // 캠페인 상세
+  String get campaignDetailTitle => _t('캠페인', 'Campaign');
+  String get likeLabel => _t('좋아요', 'Like');
+  String get likeFailed => _t(
+      '좋아요를 처리하지 못했습니다. 잠시 후 다시 시도해주세요.',
+      'Could not update your like. Please try again.');
+
   // 공지 상세
   String get noticeDetailTitle => _t('사생회 공지', 'Council Notice');
   String get noticeOpenPdf => _t('첨부 PDF 보기', 'View attached PDF');

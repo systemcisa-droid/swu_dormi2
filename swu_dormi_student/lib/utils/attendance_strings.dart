@@ -22,6 +22,25 @@ class AttendanceStrings {
   };
   String status(String ko) => isEnglish ? (_statusEn[ko] ?? ko) : ko;
 
+  // 층장/관리자가 지정한 출석 상태 기록(recordType: 'status')의 표시 문구
+  static const Map<String, String> _recordStatusEn = {
+    '불참': 'Absent',
+    '부재': 'Away',
+    '외박': 'Overnight leave',
+    '외박신청완료': 'Overnight leave (approved)',
+    '외박미수정': 'Overnight leave (unrevised)',
+    '외박미신청': 'Overnight leave (not applied)',
+    '재실확인': 'Presence confirmed',
+    '바롬인성교육관': 'Barom Character Education Hall',
+    '무단퇴사': 'Unauthorized move-out',
+    '기타': 'Other',
+  };
+  String recordStatus(String ko) => isEnglish ? (_recordStatusEn[ko] ?? ko) : ko;
+  String get statusSetByCaptain => _t('층장 지정', 'Set by floor captain');
+  // 예: "샬롬하우스 A동 3층 층장"
+  String captainOf(String floorLabel) =>
+      _t('$floorLabel 층장', 'Floor captain ($floorLabel)');
+
   String get qrCheckTitle => _t('QR 코드로 인원점검', 'Check in with QR Code');
   String get qrCheckHint => _t(
         '내 QR 코드를 층장에게 보여주면\n인원점검이 완료됩니다',

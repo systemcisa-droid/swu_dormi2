@@ -42,6 +42,11 @@ class AuthService {
     final studentId = email.split('@').first;
     final studentIdRef = _firestore.collection('student_ids').doc(studentId);
 
+    // 관리프로그램이 올린 사생 명단에 없는 학번은 가입시키지 않는다.
+    if (!await isStudentIdInRoster(studentId)) {
+      throw Exception(studentIdNotInRosterMessage);
+    }
+
     // 계정 생성 전에 먼저 확인해 대부분의 중복을 걸러낸다.
     // (동시 가입 레이스는 아래 계정 생성 후 재확인 + 롤백으로 최종 방어한다.)
     if ((await studentIdRef.get()).exists) {
@@ -137,6 +142,27 @@ class AuthService {
           onTimeout: () => throw Exception('네트워크 상황을 확인해주세요'),
         );
     return !doc.exists;
+  }
+
+  static const studentIdNotInRosterMessage =
+      '입력한 학번이 기숙사 사생 명단에 없습니다. 학번을 확인해주세요.';
+
+  // 관리프로그램이 사생 기본 정보 엑셀을 올릴 때 갱신하는 student_roster/{studentId} 명단에
+  // 이 학번이 있는지 확인한다. true면 가입 가능. 문서 존재 여부만 보므로 미인증 상태에서도 호출 가능하다.
+  // 명단이 아직 한 번도 올라오지 않았으면(_meta 없음 또는 0건) 검사를 건너뛰어 가입을 막지 않는다.
+  Future<bool> isStudentIdInRoster(String studentId) async {
+    final col = _firestore.collection('student_roster');
+    final meta = await col.doc('_meta').get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => throw Exception('네트워크 상황을 확인해주세요'),
+        );
+    final count = (meta.data()?['count'] as num?)?.toInt() ?? 0;
+    if (!meta.exists || count == 0) return true;
+    final doc = await col.doc(studentId).get().timeout(
+          const Duration(seconds: 5),
+          onTimeout: () => throw Exception('네트워크 상황을 확인해주세요'),
+        );
+    return doc.exists;
   }
 
   // Sign in with Google (학번 입력과 완전히 분리됨)

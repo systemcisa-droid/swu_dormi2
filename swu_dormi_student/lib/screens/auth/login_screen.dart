@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
-import '../../utils/app_strings.dart';
 import '../../utils/login_strings.dart';
 import '../../widgets/google_logo.dart';
-import 'signup_screen.dart';
+import 'email_login_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -16,42 +14,36 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _emailIdController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _isLoading = false;
   bool _isGoogleLoading = false;
-  bool _obscurePassword = true;
 
-  /// 이메일 로그인/회원가입 서랍이 펼쳐져 있는지 여부.
-  /// 학생들이 Google 로그인을 우선 선택하도록 기본은 접힌 상태로 둔다.
-  bool _emailDrawerOpen = false;
+  /// 숨겨진 진입점(학교명 문구) 연속 터치 횟수. 10번 터치하면 이메일 로그인 화면으로 이동한다.
+  int _hiddenEmailEntryTapCount = 0;
 
-  @override
-  void dispose() {
-    _emailIdController.dispose();
-    _passwordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _handleLogin() async {
-    // 처리 중 재진입(중복 제출) 방지
-    if (_isLoading) return;
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final error = await authProvider.signIn(
-      email: '${_emailIdController.text.trim()}@swu.ac.kr',
-      password: _passwordController.text,
-    );
-
-    setState(() => _isLoading = false);
-
-    if (error != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: Colors.red),
+  void _handleHiddenEmailEntryTap(LoginStrings s) {
+    _hiddenEmailEntryTapCount++;
+    if (_hiddenEmailEntryTapCount >= 10) {
+      _hiddenEmailEntryTapCount = 0;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          content: Text(s.emailLoginConfirmMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(s.no),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const EmailLoginScreen()),
+                );
+              },
+              child: Text(s.yes),
+            ),
+          ],
+        ),
       );
     }
   }
@@ -78,17 +70,14 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final isEnglish = Provider.of<LocaleProvider>(context).isEnglish;
     final s = LoginStrings(isEnglish);
-    final a = AppStrings(isEnglish);
 
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24.0),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
                 Align(
                   alignment: Alignment.centerRight,
                   child: _buildLanguageToggle(context),
@@ -152,184 +141,28 @@ class _LoginScreenState extends State<LoginScreen> {
                         fontWeight: FontWeight.w600),
                   ),
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.check_circle,
-                        size: 14, color: Theme.of(context).colorScheme.primary),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        s.googleLoginNoSignup,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        textAlign: TextAlign.center,
+                const SizedBox(height: 24),
+                // ── 숨겨진 이메일 로그인/회원가입 진입점 ──
+                // 이 문구를 10번 연속으로 터치하면 이메일 로그인 화면으로 이동한다.
+                // 학생들이 Google 로그인을 우선 선택하도록 눈에 띄지 않게 둔다.
+                GestureDetector(
+                  onTap: () => _handleHiddenEmailEntryTap(s),
+                  behavior: HitTestBehavior.opaque,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'Seoul Women\'s University',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade400,
                       ),
+                      textAlign: TextAlign.center,
                     ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(child: Divider(color: Colors.grey.shade300)),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        s.orDivider,
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                      ),
-                    ),
-                    Expanded(child: Divider(color: Colors.grey.shade300)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // ── 이메일 로그인/회원가입 서랍 ──
-                // 버튼을 누르면 펼쳐지고, 다시 누르면 접힌다.
-                OutlinedButton(
-                  onPressed: () => setState(
-                      () => _emailDrawerOpen = !_emailDrawerOpen),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    side: BorderSide(color: Colors.grey.shade400),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        s.emailLoginToggle,
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                      const SizedBox(width: 4),
-                      AnimatedRotation(
-                        turns: _emailDrawerOpen ? 0.5 : 0,
-                        duration: const Duration(milliseconds: 200),
-                        child: const Icon(Icons.keyboard_arrow_down, size: 20),
-                      ),
-                    ],
-                  ),
-                ),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                  alignment: Alignment.topCenter,
-                  child: _emailDrawerOpen
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const SizedBox(height: 16),
-                            TextFormField(
-                              controller: _emailIdController,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                                LengthLimitingTextInputFormatter(10),
-                              ],
-                              decoration: InputDecoration(
-                                labelText: s.emailId,
-                                prefixIcon: const Icon(Icons.email),
-                                border: const OutlineInputBorder(),
-                                suffixText: '@swu.ac.kr',
-                              ),
-                              validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return s.emailIdRequired;
-                                }
-                                if (!RegExp(r'^[0-9]{10}$')
-                                    .hasMatch(value.trim())) {
-                                  return s.googleStudentIdInvalid;
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 16),
-                            TextFormField(
-                              controller: _passwordController,
-                              obscureText: _obscurePassword,
-                              decoration: InputDecoration(
-                                labelText: s.password,
-                                prefixIcon: const Icon(Icons.lock),
-                                border: const OutlineInputBorder(),
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword
-                                        ? Icons.visibility
-                                        : Icons.visibility_off,
-                                  ),
-                                  onPressed: () {
-                                    setState(() =>
-                                        _obscurePassword = !_obscurePassword);
-                                  },
-                                ),
-                              ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return s.passwordRequired;
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 24),
-                            ElevatedButton(
-                              onPressed: _isLoading ? null : _handleLogin,
-                              style: ElevatedButton.styleFrom(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                                backgroundColor:
-                                    Theme.of(context).colorScheme.primary,
-                                foregroundColor: Colors.white,
-                              ),
-                              child: _isLoading
-                                  ? const SizedBox(
-                                      height: 20,
-                                      width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : Text(
-                                      s.login,
-                                      style: const TextStyle(fontSize: 16),
-                                    ),
-                            ),
-                            const SizedBox(height: 16),
-                            OutlinedButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => const SignupScreen(),
-                                  ),
-                                );
-                              },
-                              style: OutlinedButton.styleFrom(
-                                padding:
-                                    const EdgeInsets.symmetric(vertical: 16),
-                              ),
-                              child: Text(
-                                s.signup,
-                                style: const TextStyle(fontSize: 16),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextButton(
-                              onPressed: () {
-                                _showPasswordResetDialog(s, a);
-                              },
-                              child: Text(s.forgotPassword),
-                            ),
-                          ],
-                        )
-                      : const SizedBox(width: double.infinity),
                 ),
                 const SizedBox(height: 16),
               ],
             ),
-          ),
         ),
       ),
     );
@@ -372,59 +205,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  void _showPasswordResetDialog(LoginStrings s, AppStrings a) {
-    final emailIdController = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(s.resetPasswordTitle),
-        content: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Expanded(
-              child: TextField(
-                controller: emailIdController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: InputDecoration(
-                  labelText: s.emailId,
-                  hintText: s.enterIdHint,
-                ),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.only(left: 4, bottom: 4),
-              child: Text('@swu.ac.kr', style: TextStyle(fontSize: 14)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(a.cancel),
-          ),
-          TextButton(
-            onPressed: () async {
-              final email = '${emailIdController.text.trim()}@swu.ac.kr';
-              if (emailIdController.text.trim().isEmpty) return;
-
-              final authProvider =
-                  Provider.of<AuthProvider>(context, listen: false);
-              final error = await authProvider.resetPassword(email);
-
-              if (mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(error ?? s.resetPasswordEmailSent),
-                    backgroundColor: error != null ? Colors.red : Colors.green,
-                  ),
-                );
-              }
-            },
-            child: Text(a.send),
-          ),
-        ],
-      ),
-    );
-  }
 }

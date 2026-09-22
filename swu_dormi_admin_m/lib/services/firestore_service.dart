@@ -69,11 +69,15 @@ class FirestoreService {
   }
 
   // 시설 신고 (facilities 또는 facility_reports 모두 지원)
-  Stream<QuerySnapshot> getRepairReports({String? status}) {
+  // statuses가 주어지면 status는 무시하고 whereIn으로 여러 상태를 함께 조회한다
+  // (예: 대기중+처리중을 한 번에 보기).
+  Stream<QuerySnapshot> getRepairReports({String? status, List<String>? statuses}) {
     // facility_reports 컬렉션 사용
     CollectionReference reports = _firestore.collection('facility_reports');
     Query query = reports;
-    if (status != null) {
+    if (statuses != null && statuses.isNotEmpty) {
+      query = query.where('status', whereIn: statuses);
+    } else if (status != null) {
       query = query.where('status', isEqualTo: status);
     }
     // 인덱스가 필요하므로 orderBy 제거

@@ -8,9 +8,9 @@ import 'checklist_data.dart';
 import '../../services/storage_service.dart';
 import '../cleaning/cleaning_inspection_screen.dart' show kFloorOptions;
 
-// "샬롬 각층" 점검표에서 선택 가능한 점검구역 (샬롬하우스 소속 층만, 겨울방학 임시배정 제외)
+// "샬롬 각층" 점검표에서 선택 가능한 점검구역 (샬롬하우스 소속 층만, 방학 임시배정 제외)
 final List<String> kShalomFloorCheckAreas =
-    kFloorOptions.where((f) => f.startsWith('샬롬하우스') && !f.contains('겨울방학')).toList();
+    kFloorOptions.where((f) => f.startsWith('샬롬하우스') && !f.contains('방학')).toList();
 
 class ChecklistScreen extends StatefulWidget {
   const ChecklistScreen({super.key});

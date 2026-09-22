@@ -7,6 +7,7 @@ import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../notices/pdf_viewer_screen.dart';
 import 'package:provider/provider.dart';
 import '../../providers/locale_provider.dart';
+import '../../services/database_service.dart';
 import '../../utils/student_council_strings.dart';
 
 /// 투표 마감 시각. 규정상 종료일 오후 8시에 투표가 종료된다.
@@ -66,6 +67,8 @@ class CouncilElectionsScreen extends StatelessWidget {
 ///   - council_campaigns : 캠페인
 ///   - council_elections : 선거
 class _StudentCouncilShared {
+  static final _db = DatabaseService();
+
   // ── 공통 상태 위젯 ──────────────────────────────────────────
   static Widget _buildEmpty(IconData icon, String message) {
     return Center(
@@ -137,15 +140,16 @@ class _StudentCouncilShared {
       emptyIcon: Icons.inbox,
       emptyMessage: s.noticesEmpty,
       errorMessage: s.loadError,
-      itemBuilder: (context, id, data) => _buildNoticeCard(context, data, s),
+      itemBuilder: (context, id, data) => _buildNoticeCard(context, id, data, s),
     );
   }
 
-  static Widget _buildNoticeCard(
-      BuildContext context, Map<String, dynamic> data, StudentCouncilStrings s) {
+  static Widget _buildNoticeCard(BuildContext context, String id,
+      Map<String, dynamic> data, StudentCouncilStrings s) {
     final title = (data['title'] ?? '').toString();
     final content = (data['content'] ?? '').toString();
     final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+    final viewCount = (data['viewCount'] as num?)?.toInt() ?? 0;
     final isPinned = data['isPinned'] == true;
     final imageUrls = (data['imageUrls'] as List?)
             ?.map((e) => e.toString())
@@ -157,12 +161,17 @@ class _StudentCouncilShared {
     return Column(
       children: [
         InkWell(
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CouncilNoticeDetailScreen(data: data),
-            ),
-          ),
+          onTap: () {
+            // 공지사항과 동일하게 계정당 1회만 집계한다. 실패해도 열람은 막지 않는다.
+            final uid = FirebaseAuth.instance.currentUser?.uid;
+            if (uid != null) _db.incrementCouncilNoticeViewCount(id, uid);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CouncilNoticeDetailScreen(id: id, data: data),
+              ),
+            );
+          },
           child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
@@ -217,14 +226,25 @@ class _StudentCouncilShared {
                             TextStyle(fontSize: 13, color: Colors.grey.shade600),
                       ),
                     ],
-                    if (createdAt != null) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        DateFormat('yyyy.MM.dd').format(createdAt),
-                        style:
-                            TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                      ),
-                    ],
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.visibility_outlined,
+                            size: 13, color: Colors.grey.shade500),
+                        const SizedBox(width: 3),
+                        Text(
+                          '$viewCount',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade500),
+                        ),
+                        if (createdAt != null)
+                          Text(
+                            '  |  ${DateFormat('yyyy.MM.dd').format(createdAt)}',
+                            style: TextStyle(
+                                fontSize: 12, color: Colors.grey.shade500),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -258,31 +278,38 @@ class _StudentCouncilShared {
       emptyIcon: Icons.volunteer_activism_outlined,
       emptyMessage: s.campaignsEmpty,
       errorMessage: s.loadError,
-      itemBuilder: (context, id, data) => _buildCampaignCard(data, s),
+      itemBuilder: (context, id, data) => _buildCampaignCard(context, id, data, s),
     );
   }
 
-  static Widget _buildCampaignCard(
+  /// 캠페인 기간으로 진행 상태(라벨·색)를 계산한다. 목록 카드와 상세 화면이 함께 쓴다.
+  static ({String label, Color color}) _campaignStatus(
+      Map<String, dynamic> data, StudentCouncilStrings s) {
+    final start = (data['startDate'] as Timestamp?)?.toDate();
+    final end = (data['endDate'] as Timestamp?)?.toDate();
+    final now = DateTime.now();
+    if (start != null && now.isBefore(start)) {
+      return (label: s.statusUpcoming, color: const Color(0xFFFF9800));
+    } else if (end != null && now.isAfter(end)) {
+      return (label: s.statusClosed, color: const Color(0xFF757575));
+    }
+    return (label: s.statusOngoing, color: const Color(0xFF009688));
+  }
+
+  static Widget _buildCampaignCard(BuildContext context, String id,
       Map<String, dynamic> data, StudentCouncilStrings s) {
     final title = (data['title'] ?? '').toString();
     final content = (data['content'] ?? '').toString();
     final start = (data['startDate'] as Timestamp?)?.toDate();
     final end = (data['endDate'] as Timestamp?)?.toDate();
-
-    // 기간으로 진행 상태를 계산한다.
-    final now = DateTime.now();
-    String statusLabel;
-    Color statusColor;
-    if (start != null && now.isBefore(start)) {
-      statusLabel = s.statusUpcoming;
-      statusColor = const Color(0xFFFF9800);
-    } else if (end != null && now.isAfter(end)) {
-      statusLabel = s.statusClosed;
-      statusColor = const Color(0xFF757575);
-    } else {
-      statusLabel = s.statusOngoing;
-      statusColor = const Color(0xFF009688);
-    }
+    final status = _campaignStatus(data, s);
+    final statusLabel = status.label;
+    final statusColor = status.color;
+    final viewCount = (data['viewCount'] as num?)?.toInt() ?? 0;
+    final likeCount = (data['likeCount'] as num?)?.toInt() ?? 0;
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    final isLiked =
+        myUid != null && ((data['likes'] as List?)?.contains(myUid) ?? false);
 
     final fmt = DateFormat('yyyy.MM.dd');
     final period = [
@@ -292,7 +319,18 @@ class _StudentCouncilShared {
 
     return Column(
       children: [
-        Padding(
+        InkWell(
+          onTap: () {
+            // 공지사항과 동일하게 계정당 1회만 집계한다. 실패해도 열람은 막지 않는다.
+            if (myUid != null) _db.incrementCampaignViewCount(id, myUid);
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => CampaignDetailScreen(id: id, data: data),
+              ),
+            );
+          },
+          child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -354,7 +392,28 @@ class _StudentCouncilShared {
                   ],
                 ),
               ],
+              // 조회수 · 좋아요 (게시판 목록과 같은 표시 방식)
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(Icons.visibility_outlined,
+                      size: 13, color: Colors.grey.shade500),
+                  const SizedBox(width: 3),
+                  Text('$viewCount',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                  const SizedBox(width: 12),
+                  Icon(isLiked ? Icons.favorite : Icons.favorite_border,
+                      size: 13,
+                      color: isLiked ? Colors.red : Colors.grey.shade500),
+                  const SizedBox(width: 3),
+                  Text('$likeCount',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                ],
+              ),
             ],
+          ),
           ),
         ),
         Divider(height: 1, thickness: 1, color: Colors.grey.shade200),
@@ -1143,8 +1202,10 @@ class CandidateProfileScreen extends StatelessWidget {
 
 /// 사생회 공지 상세 화면. 이미지·PDF 첨부를 함께 보여준다.
 class CouncilNoticeDetailScreen extends StatelessWidget {
+  final String id;
   final Map<String, dynamic> data;
-  const CouncilNoticeDetailScreen({super.key, required this.data});
+  const CouncilNoticeDetailScreen(
+      {super.key, required this.id, required this.data});
 
   @override
   Widget build(BuildContext context) {
@@ -1191,13 +1252,42 @@ class CouncilNoticeDetailScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            Text(
-              [
-                if (authorName.isNotEmpty) authorName,
-                if (createdAt != null)
-                  DateFormat('yyyy.MM.dd HH:mm').format(createdAt),
-              ].join('  ·  '),
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+            Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    [
+                      if (authorName.isNotEmpty) authorName,
+                      if (createdAt != null)
+                        DateFormat('yyyy.MM.dd HH:mm').format(createdAt),
+                    ].join('  ·  '),
+                    overflow: TextOverflow.ellipsis,
+                    style:
+                        TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Icon(Icons.visibility_outlined,
+                    size: 14, color: Colors.grey.shade500),
+                const SizedBox(width: 3),
+                // 목록에서 넘어온 값은 본인 조회가 반영되기 전이므로 문서를 구독해 최신 값을 보여준다.
+                StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('council_notices')
+                      .doc(id)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    final live = snapshot.data?.data()?['viewCount'] as num?;
+                    final count =
+                        (live ?? data['viewCount'] as num?)?.toInt() ?? 0;
+                    return Text(
+                      '$count',
+                      style: TextStyle(
+                          fontSize: 13, color: Colors.grey.shade500),
+                    );
+                  },
+                ),
+              ],
             ),
             const SizedBox(height: 16),
             const Divider(height: 1),
@@ -1250,6 +1340,220 @@ class CouncilNoticeDetailScreen extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// 캠페인 상세 화면. 이미지·PDF 첨부, 조회수, 좋아요를 보여준다.
+/// 조회수·좋아요는 다른 학생이 누를 때마다 바뀌므로 문서를 구독해 실시간으로 반영한다.
+class CampaignDetailScreen extends StatefulWidget {
+  final String id;
+  final Map<String, dynamic> data;
+  const CampaignDetailScreen({super.key, required this.id, required this.data});
+
+  @override
+  State<CampaignDetailScreen> createState() => _CampaignDetailScreenState();
+}
+
+class _CampaignDetailScreenState extends State<CampaignDetailScreen> {
+  final _db = DatabaseService();
+  // 좋아요 처리 중 중복 탭 방지 (규칙이 likeCount 불일치 요청을 거부하므로 필요하다)
+  bool _isLiking = false;
+
+  Future<void> _toggleLike(bool currentlyLiked, StudentCouncilStrings s) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null || _isLiking) return;
+    setState(() => _isLiking = true);
+    try {
+      await _db.setCampaignLike(widget.id, uid, !currentlyLiked);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(s.likeFailed)));
+      }
+    } finally {
+      if (mounted) setState(() => _isLiking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s =
+        StudentCouncilStrings(Provider.of<LocaleProvider>(context).isEnglish);
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+
+    return Scaffold(
+      appBar: AppBar(title: Text(s.campaignDetailTitle)),
+      body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+        stream: FirebaseFirestore.instance
+            .collection('council_campaigns')
+            .doc(widget.id)
+            .snapshots(),
+        builder: (context, snapshot) {
+          // 아직 도착하지 않았거나 문서가 사라졌으면 목록에서 넘어온 값을 쓴다.
+          final data = snapshot.data?.data() ?? widget.data;
+
+          final title = (data['title'] ?? '').toString();
+          final content = (data['content'] ?? '').toString();
+          final start = (data['startDate'] as Timestamp?)?.toDate();
+          final end = (data['endDate'] as Timestamp?)?.toDate();
+          final imageUrls = (data['imageUrls'] as List?)
+                  ?.map((e) => e.toString())
+                  .where((e) => e.isNotEmpty)
+                  .toList() ??
+              [];
+          final pdfUrl = (data['pdfUrl'] ?? '').toString();
+          final pdfFileName = (data['pdfFileName'] ?? '').toString();
+          final viewCount = (data['viewCount'] as num?)?.toInt() ?? 0;
+          final likeCount = (data['likeCount'] as num?)?.toInt() ?? 0;
+          final isLiked = myUid != null &&
+              ((data['likes'] as List?)?.contains(myUid) ?? false);
+          final status = _StudentCouncilShared._campaignStatus(data, s);
+
+          final fmt = DateFormat('yyyy.MM.dd');
+          final period = [
+            if (start != null) fmt.format(start),
+            if (end != null) fmt.format(end),
+          ].join(' ~ ');
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 3),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: status.color.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        status.label,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: status.color,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          height: 1.3,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    if (period.isNotEmpty) ...[
+                      Icon(Icons.calendar_today_outlined,
+                          size: 13, color: Colors.grey.shade500),
+                      const SizedBox(width: 5),
+                      Flexible(
+                        child: Text(
+                          period,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                              fontSize: 13, color: Colors.grey.shade500),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Icon(Icons.visibility_outlined,
+                        size: 14, color: Colors.grey.shade500),
+                    const SizedBox(width: 3),
+                    Text('$viewCount',
+                        style:
+                            TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Divider(height: 1),
+                const SizedBox(height: 16),
+
+                // 첨부 이미지
+                if (imageUrls.isNotEmpty) ...[
+                  for (final url in imageUrls)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(
+                          url,
+                          width: double.infinity,
+                          fit: BoxFit.fitWidth,
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                ],
+
+                if (content.isNotEmpty)
+                  Text(content,
+                      style: const TextStyle(fontSize: 15, height: 1.7)),
+
+                // 첨부 PDF
+                if (pdfUrl.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => PdfViewerScreen(
+                          pdfUrl: pdfUrl,
+                          pdfFileName: pdfFileName.isEmpty
+                              ? s.campaignDetailTitle
+                              : pdfFileName,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                    label: Text(
+                      pdfFileName.isEmpty ? s.noticeOpenPdf : pdfFileName,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 46),
+                    ),
+                  ),
+                ],
+
+                // 좋아요
+                const SizedBox(height: 28),
+                Center(
+                  child: OutlinedButton.icon(
+                    onPressed: (myUid == null || _isLiking)
+                        ? null
+                        : () => _toggleLike(isLiked, s),
+                    icon: Icon(
+                      isLiked ? Icons.favorite : Icons.favorite_border,
+                      size: 20,
+                      color: isLiked ? Colors.red : Colors.grey.shade600,
+                    ),
+                    label: Text('${s.likeLabel}  $likeCount'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(140, 44),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }

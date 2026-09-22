@@ -6,6 +6,15 @@ class SignupStrings {
 
   String get title => _t('회원가입', 'Sign Up');
   String get signupComplete => _t('회원가입이 완료되었습니다!', 'Sign up complete!');
+
+  // 회원가입 학번이 관리프로그램의 사생 명단에 없을 때 띄우는 안내 팝업
+  String get studentIdNotInRosterTitle => _t('학번을 확인해주세요', 'Please check your student ID');
+  String get studentIdNotInRosterBody => _t(
+      '입력한 학번이 기숙사 사생 명단에 없습니다.\n\n'
+      '학번을 다시 확인해주세요. 학번이 맞는데도 계속 안 되면 기숙사 행정실에 문의해주세요.',
+      'The student ID you entered is not on the dormitory resident list.\n\n'
+      'Please double-check your student ID. If it is correct, contact the dormitory office.');
+  String get studentIdNotInRosterOk => _t('확인', 'OK');
   String get name => _t('이름', 'Name');
   String get nameRequired => _t('이름을 입력해주세요', 'Please enter your name');
   String get emailId => _t('이메일 아이디 (학번)', 'Email ID (Student ID)');

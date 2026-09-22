@@ -1,7 +1,18 @@
 import 'package:flutter/material.dart' hide Colors, FilledButton, IconButton, Card, ListTile, showDialog, Divider, Checkbox, Tooltip, ButtonStyle;
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+
+// 샬롬하우스 125호는 매주 월요일 21:30~22:30을 정기적으로 막아둔다(관리자 지정).
+// 학생앱(swu_dormi_student/lib/screens/reservation/reservation_screen.dart)의 같은 규칙과 짝을 이루되,
+// 여기서는 실제 예약 문서로 만들어 이 캘린더에 예약된 것처럼 보이고, 특정 주만 예약 취소 버튼으로
+// 해제할 수도 있게 한다(예: 그 주에 세미나실을 실제로 열어줘야 하는 경우).
+const String _kRecurringBlockRoomLabel = '샬롬하우스 125호';
+const int _kRecurringBlockWeekday = DateTime.monday;
+const int _kRecurringBlockStartSlot = 43; // 21:30
+const int _kRecurringBlockEndSlot = 44; // ~22:30
+const String _kRecurringBlockUserName = '정기예약(관리자 지정)';
 
 const int _kSlotStartHour = 0;
 const int _kSlotEndHour = 24;
@@ -61,15 +72,20 @@ class _WindowsReservationsScreenState extends State<WindowsReservationsScreen> {
     });
     try {
       final dateKey = _dateFormat.format(_selectedDate);
-      final snap = await _firestore
-          .collection('seminar_room_reservations')
-          .where('date', isEqualTo: dateKey)
-          .get();
-      final list = snap.docs.map((d) {
-        final data = d.data();
-        data['_id'] = d.id;
-        return data;
-      }).toList();
+      var list = await _fetchReservations(dateKey);
+
+      // 이 날짜가 월요일이고, 아직 정기 예약 문서가 없으면(과거 날짜는 건드리지 않는다) 만들어 둔다.
+      final today = DateTime.now();
+      final isPastDate = _selectedDate
+          .isBefore(DateTime(today.year, today.month, today.day));
+      if (!isPastDate && _selectedDate.weekday == _kRecurringBlockWeekday) {
+        final hasBlock = list.any((r) => _overlapsRecurringBlock(r));
+        if (!hasBlock) {
+          final created = await _ensureRecurringBlock(dateKey);
+          if (created) list = await _fetchReservations(dateKey);
+        }
+      }
+
       if (!mounted) return;
       setState(() {
         _reservations = list;
@@ -81,6 +97,50 @@ class _WindowsReservationsScreenState extends State<WindowsReservationsScreen> {
         _isLoading = false;
         _errorMessage = e.toString();
       });
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchReservations(String dateKey) async {
+    final snap = await _firestore
+        .collection('seminar_room_reservations')
+        .where('date', isEqualTo: dateKey)
+        .get();
+    return snap.docs.map((d) {
+      final data = d.data();
+      data['_id'] = d.id;
+      return data;
+    }).toList();
+  }
+
+  bool _overlapsRecurringBlock(Map<String, dynamic> r) {
+    if (r['roomLabel'] != _kRecurringBlockRoomLabel) return false;
+    final start = (r['startSlot'] as num?)?.toInt() ?? 0;
+    final end = (r['endSlot'] as num?)?.toInt() ?? start;
+    return start <= _kRecurringBlockEndSlot && end >= _kRecurringBlockStartSlot;
+  }
+
+  /// 정기 예약 문서를 생성한다. 관리자 계정 UID로 만들어야 보안 규칙(생성자 본인 uid)을 통과한다.
+  /// 로그인 정보를 못 가져오는 등 실패해도 화면 로딩 자체는 막지 않는다.
+  Future<bool> _ensureRecurringBlock(String dateKey) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    try {
+      await _firestore.collection('seminar_room_reservations').add({
+        'roomId': 'shalom_125',
+        'roomLabel': _kRecurringBlockRoomLabel,
+        'date': dateKey,
+        'startSlot': _kRecurringBlockStartSlot,
+        'endSlot': _kRecurringBlockEndSlot,
+        'userId': uid,
+        'userName': _kRecurringBlockUserName,
+        'roomNumber': '-',
+        'isRecurringBlock': true,
+        'createdAt': Timestamp.now(),
+      });
+      return true;
+    } catch (e) {
+      debugPrint('정기 예약 생성 실패: $e');
+      return false;
     }
   }
 
@@ -126,6 +186,7 @@ class _WindowsReservationsScreenState extends State<WindowsReservationsScreen> {
     final roomLabel = r['roomLabel'] as String? ?? '';
     final userName = r['userName'] as String? ?? '';
     final roomNumber = r['roomNumber'] as String? ?? '';
+    final isRecurringBlock = r['isRecurringBlock'] == true;
     final start = (r['startSlot'] as num?)?.toInt() ?? 0;
     final end = (r['endSlot'] as num?)?.toInt() ?? start;
     final createdAt = (r['createdAt'] as Timestamp?)?.toDate();
@@ -140,7 +201,9 @@ class _WindowsReservationsScreenState extends State<WindowsReservationsScreen> {
           children: [
             _detailRow('세미나실', roomLabel),
             _detailRow('시간', '${_slotTimeLabel(start)} ~ ${_slotTimeLabel(end + 1)}'),
-            _detailRow('예약자', '$userName ($roomNumber호)'),
+            _detailRow('예약자', isRecurringBlock ? userName : '$userName ($roomNumber호)'),
+            if (isRecurringBlock)
+              _detailRow('안내', '매주 월요일 자동 생성. 이 주만 취소하려면 아래 예약 취소를 누르세요.'),
             if (createdAt != null)
               _detailRow('신청 시각', DateFormat('yyyy.MM.dd HH:mm').format(createdAt)),
           ],

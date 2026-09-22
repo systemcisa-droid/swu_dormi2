@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm:*)",
+      "Bash(flutter pub get:*)",
+      "Bash(cmake:*)",
+      "Bash(where:*)",
+      "Bash(ls:*)",
+      "Bash(cmd.exe /c \"완전재빌드.bat\")",
+      "Bash(if [ -d \"build\" ])",
+      "Bash(then rm -rf build)",
+      "Bash(else echo \"build folder not found\")",
+      "Bash(fi)",
+      "Bash(flutter build:*)",
+      "Bash(git add:*)",
+      "Bash(git push:*)",
+      "Bash(cd \"C:\\\\Users\\\\bvector\\\\StudioProjects\\\\swu_dormi_admin_w\" && flutter analyze lib/screens/windows/windows_students_screen.dart 2>&1 | grep -v \"^Analyzing\\\\|^$\\\\|flutter upgrade\\\\|new version\\\\|─\\\\|│\")",
+      "Bash(cd \"C:\\\\Users\\\\bvector\\\\StudioProjects\\\\SWU_Dormi\" && firebase firestore:rules:get 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\bvector\\\\StudioProjects\\\\SWU_Dormi\" && firebase deploy --only firestore:rules 2>&1)",
+      "Bash(cd \"C:\\\\Users\\\\bvector\\\\StudioProjects\\\\SWU_Dormi\" && firebase deploy --only storage 2>&1)"
+    ]
+  }
+}

@@ -21,12 +21,12 @@ class LoginStrings {
   String get enterIdHint => _t('아이디를 입력하세요', 'Enter your ID');
   String get resetPasswordEmailSent =>
       _t('비밀번호 재설정 이메일이 발송되었습니다', 'Password reset email has been sent');
-  String get orDivider => _t('또는', 'OR');
-  String get googleLogin => _t('Google 계정으로 로그인', 'Sign in with Google');
-  String get googleLoginNoSignup =>
-      _t('회원가입 없이 바로 시작 · Google 계정이면 OK',
-          'Start right away — no sign-up needed with your Google account');
   String get emailLoginToggle => _t('이메일로 로그인 / 회원가입', 'Log in / sign up with email');
+  String get emailLoginConfirmMessage =>
+      _t('"이메일 로그인/회원가입" 페이지로 이동하시겠습니까?', 'Go to the "Log in / sign up with email" page?');
+  String get yes => _t('예', 'Yes');
+  String get no => _t('아니오', 'No');
+  String get googleLogin => _t('Google 계정으로 로그인', 'Sign in with Google');
   String get googleLoginNotStudent =>
       _t('학생 계정만 로그인할 수 있습니다.', 'Only student accounts can log in.');
   String get googleStudentIdLabel => _t('학번', 'Student ID');
@@ -43,5 +43,14 @@ class LoginStrings {
   String get googleStudentIdPageGuide =>
       _t('Google 계정으로 처음 로그인하셨습니다.\n학번을 입력하고 완료해주세요.', 'This is your first sign-in with this Google account.\nPlease enter your student ID to continue.');
   String get googleStudentIdComplete => _t('완료', 'Done');
+
+  // 회원가입 학번이 관리프로그램의 사생 명단에 없을 때 띄우는 안내 팝업
+  String get studentIdNotInRosterTitle => _t('학번을 확인해주세요', 'Please check your student ID');
+  String get studentIdNotInRosterBody => _t(
+      '입력한 학번이 기숙사 사생 명단에 없습니다.\n\n'
+      '학번을 다시 확인해주세요. 학번이 맞는데도 계속 안 되면 기숙사 행정실에 문의해주세요.',
+      'The student ID you entered is not on the dormitory resident list.\n\n'
+      'Please double-check your student ID. If it is correct, contact the dormitory office.');
+  String get studentIdNotInRosterOk => _t('확인', 'OK');
   String get cancelSignUp => _t('가입 취소', 'Cancel sign-up');
 }

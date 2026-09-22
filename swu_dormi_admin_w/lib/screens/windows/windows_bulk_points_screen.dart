@@ -1008,7 +1008,7 @@ class _WindowsBulkPointsScreenState extends State<WindowsBulkPointsScreen> {
               children: [
                 SizedBox(width: 90, child: Text('학번', style: headerStyle)),
                 SizedBox(width: 50, child: Text('호실', style: headerStyle)),
-                SizedBox(width: 70, child: Text('성명', style: headerStyle)),
+                SizedBox(width: 210, child: Text('성명', style: headerStyle)),
                 SizedBox(width: 90, child: Text('부과일자', style: headerStyle)),
                 SizedBox(width: 40, child: Text('순번', style: headerStyle)),
                 SizedBox(width: 90, child: Text('상벌구분', style: headerStyle)),
@@ -1041,7 +1041,7 @@ class _WindowsBulkPointsScreenState extends State<WindowsBulkPointsScreen> {
                         child: Text('${row.roomNumber}호', style: const TextStyle(fontSize: 13)),
                       ),
                       SizedBox(
-                        width: 70,
+                        width: 210,
                         child: Text(row.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                       ),
                       SizedBox(

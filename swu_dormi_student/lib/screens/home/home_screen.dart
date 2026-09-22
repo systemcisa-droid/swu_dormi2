@@ -114,6 +114,51 @@ class _HomeScreenState extends State<HomeScreen> {
     return false;
   }
 
+  /// 프로필에 기숙사 건물·호실·자리 번호가 모두 등록되어 있는지 확인하고,
+  /// 빠진 항목이 있으면 안내 후 false 를 반환한다.
+  /// 층장이 QR을 스캔할 때 학생 호실을 대조하므로 이 정보가 없으면 출석 처리가 어긋난다.
+  Future<bool> _requireCompleteProfile() async {
+    final user =
+        Provider.of<AuthProvider>(context, listen: false).currentUser;
+    final s = HomeStrings(
+        Provider.of<LocaleProvider>(context, listen: false).isEnglish);
+    final roomNumber = user?.roomNumber.trim() ?? '';
+    final missing = <String>[
+      if ((user?.dormBuilding ?? '').trim().isEmpty) s.profileFieldDormBuilding,
+      // '000' 은 가입 시 채워지는 기본값이라 미등록으로 본다.
+      if (roomNumber.isEmpty || roomNumber == '000') s.profileFieldRoomNumber,
+      if ((user?.seatNumber ?? '').trim().isEmpty) s.profileFieldSeatNumber,
+    ];
+    if (missing.isEmpty) return true;
+
+    if (!mounted) return false;
+    final goToProfile = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.profileRequiredTitle),
+        content: Text(s.profileRequiredContent(missing.join(', '))),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.profileRequiredClose),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.profileRequiredGo),
+          ),
+        ],
+      ),
+    );
+
+    if (goToProfile == true && mounted) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const ProfileScreen()),
+      );
+    }
+    return false;
+  }
+
   Future<void> _checkAndShowPopupNotice() async {
     // await 이후 context 접근을 피하기 위해 먼저 확보한다.
     final s = HomeStrings(
@@ -603,6 +648,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               final navigator = Navigator.of(context);
                               navigator.pop();
                               if (!await _requireRegulationAgreement()) return;
+                              if (!await _requireCompleteProfile()) return;
                               // 층장이 스캔해 출석이 기록되면(true) 인원점검 화면으로 이동한다.
                               final checkedIn = await navigator.push<bool>(
                                 MaterialPageRoute(

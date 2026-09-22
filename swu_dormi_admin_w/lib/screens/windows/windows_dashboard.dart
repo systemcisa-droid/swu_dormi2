@@ -18,9 +18,11 @@ class _WindowsDashboardState extends State<WindowsDashboard> {
   final _dateFormat = DateFormat('yyyy년 MM월 dd일');
   final _timeFormat = DateFormat('HH:mm');
 
-  int _monthlyAttendanceTotal = 0;
+
+  /// 층장단톡: 안 읽은 메시지가 있는 채팅방 수 / 전체 채팅방 수
+  int _unreadChatRooms = 0;
+  int _totalChatRooms = 0;
   late Future<Map<String, int>> _statisticsFuture;
-  List<Map<String, dynamic>> _activeAttendanceEvents = [];
   List<Map<String, dynamic>> _todaySchedules = [];
   Map<String, String> _roleMap = {};
 
@@ -36,7 +38,7 @@ class _WindowsDashboardState extends State<WindowsDashboard> {
   void initState() {
     super.initState();
     _statisticsFuture = _firestoreService.getStatistics();
-    _loadActiveAttendanceEvents();
+    _loadChatStats();
     _loadTodaySchedules();
   }
 
@@ -87,25 +89,38 @@ class _WindowsDashboardState extends State<WindowsDashboard> {
     } catch (_) {}
   }
 
-  Future<void> _loadActiveAttendanceEvents() async {
+  /// 층장단톡 현황을 집계한다.
+  /// 각 방의 마지막 메시지를 층장이 읽지 않았으면 '안 읽음'으로 센다.
+  Future<void> _loadChatStats() async {
     try {
-      final results = await Future.wait([
-        FirebaseFirestore.instance
-            .collection('attendance_events')
-            .where('status', isEqualTo: 'active')
-            .get(),
-        FirebaseFirestore.instance.collection('attendance_events').get(),
-      ]);
+      final rooms = await FirebaseFirestore.instance
+          .collection('floor_chats')
+          .get();
+
+      var unread = 0;
+      for (final room in rooms.docs) {
+        // 방마다 마지막 메시지 1건만 확인해 조회량을 줄인다.
+        final last = await room.reference
+            .collection('messages')
+            .orderBy('createdAt', descending: true)
+            .limit(1)
+            .get();
+        if (last.docs.isEmpty) continue;
+
+        final data = last.docs.first.data();
+        final senderRoom = (data['roomNumber'] as String?) ?? '';
+        // 층장이 보낸 메시지는 층장 입장에서 읽지 않은 것이 아니다.
+        if (senderRoom == '층장') continue;
+
+        final readBy = (data['readBy'] as List<dynamic>?) ?? const [];
+        // 보낸 사람 외에 아무도 읽지 않았으면 대기중으로 본다.
+        if (readBy.length <= 1) unread++;
+      }
+
       if (!mounted) return;
-      final activeSnap = results[0] as QuerySnapshot;
-      final totalSnap = results[1] as QuerySnapshot;
       setState(() {
-        _activeAttendanceEvents = activeSnap.docs.map((d) {
-          final data = d.data() as Map<String, dynamic>;
-          data['_id'] = d.id;
-          return data;
-        }).toList();
-        _monthlyAttendanceTotal = totalSnap.docs.length;
+        _totalChatRooms = rooms.docs.length;
+        _unreadChatRooms = unread;
       });
     } catch (_) {}
   }
@@ -297,7 +312,7 @@ class _WindowsDashboardState extends State<WindowsDashboard> {
             child: Row(
               children: [
                 Text(
-                  '대시보드(2026 2학기/겨울방학)',
+                  '대시보드(2026 2학기/방학)',
                   style: FluentTheme.of(context).typography.subtitle?.copyWith(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 const Spacer(),
@@ -399,11 +414,11 @@ class _WindowsDashboardState extends State<WindowsDashboard> {
                             ),
                             Expanded(
                               child: _buildStatCard(
-                                title: '출석체크',
-                                value: '${_activeAttendanceEvents.length}',
-                                icon: FluentIcons.check_list,
+                                title: '층장단톡',
+                                value: '$_unreadChatRooms',
+                                icon: FluentIcons.chat,
                                 color: Colors.blue,
-                                total: _monthlyAttendanceTotal,
+                                total: _totalChatRooms,
                               ),
                             ),
                           ],

@@ -32,4 +32,9 @@ class ReservationStrings {
   String get confirm => _t('취소하기', 'Yes, Cancel');
   String errorLabel(Object e) => _t('오류: $e', 'Error: $e');
   String get loadingSlots => _t('예약 현황을 불러오는 중...', 'Loading availability...');
+  String get shalom125MondayCaution => _t(
+      '샬롬하우스 125호는 매주 월요일 21:30~22:30에는 예약할 수 없습니다',
+      'Room 125 (Shalom House) cannot be reserved on Mondays from 21:30 to 22:30');
+  String get slotBlockedByRule =>
+      _t('이 시간대는 예약이 제한되어 있습니다', 'Reservations are restricted for this time slot');
 }

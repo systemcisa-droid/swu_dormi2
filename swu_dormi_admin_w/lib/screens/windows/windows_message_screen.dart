@@ -106,9 +106,10 @@ class _WindowsMessageScreenState extends State<WindowsMessageScreen> {
   final _searchController = TextEditingController();
 
   int _selectedTab = 0; // 0: 메시지 작성, 1: 보낸 메시지
-  String _selectedTarget = 'individual';
+  // 수신 대상 기본값은 샬롬하우스 A동 2층
+  String _selectedTarget = 'shalom_a_floor_2';
   String _searchQuery = '';
-  List<String> _selectedUserIds = [];
+  final List<String> _selectedUserIds = [];
   List<QueryDocumentSnapshot> _students = [];
   bool _isLoading = false;
   bool _isSending = false;
@@ -500,36 +501,49 @@ class _WindowsMessageScreenState extends State<WindowsMessageScreen> {
                               if (value != null) {
                                 setState(() {
                                   _selectedTarget = value;
-                                  // 필터 변경 시 해당 필터의 학생 전체 자동 선택
-                                  if (value == 'all') {
-                                    _selectedUserIds = _students.map((d) => d.id).toList();
-                                  } else if (value == 'individual') {
-                                    _selectedUserIds.clear();
-                                  } else {
-                                    _selectedUserIds = _getFilteredUserIds(value);
-                                  }
+                                  // 구역을 바꾸면 이전 구역의 선택은 초기화한다.
+                                  // (자동 전체 선택 대신 아래 '모두 선택' 체크박스를 사용)
+                                  _selectedUserIds.clear();
                                 });
                               }
                             },
                           ),
                           const SizedBox(height: 8),
-                          // 전체 선택 / 해제
+                          // 모두 선택 (해당 구역 학생 전체를 한 번에 선택/해제)
                           Builder(builder: (ctx) {
                             final visibleIds = _selectedTarget == 'individual' || _selectedTarget == 'all'
                                 ? _students.map((d) => d.id).toList()
                                 : _getFilteredUserIds(_selectedTarget);
-                            return Row(
-                              children: [
-                                Button(
-                                  onPressed: () => setState(() => _selectedUserIds = List.from(visibleIds)),
-                                  child: const Text('전체 선택', style: TextStyle(fontSize: 12)),
-                                ),
-                                const SizedBox(width: 8),
-                                Button(
-                                  onPressed: () => setState(() => _selectedUserIds.clear()),
-                                  child: const Text('선택 해제', style: TextStyle(fontSize: 12)),
-                                ),
-                              ],
+                            final selectedCount = visibleIds
+                                .where((id) => _selectedUserIds.contains(id))
+                                .length;
+                            // 일부만 선택된 경우 중간 상태로 표시한다.
+                            final bool? checked = visibleIds.isEmpty
+                                ? false
+                                : selectedCount == visibleIds.length
+                                    ? true
+                                    : selectedCount == 0
+                                        ? false
+                                        : null;
+                            return Checkbox(
+                              checked: checked,
+                              onChanged: visibleIds.isEmpty
+                                  ? null
+                                  : (value) => setState(() {
+                                        if (value == true) {
+                                          for (final id in visibleIds) {
+                                            if (!_selectedUserIds.contains(id)) {
+                                              _selectedUserIds.add(id);
+                                            }
+                                          }
+                                        } else {
+                                          _selectedUserIds.removeWhere(visibleIds.contains);
+                                        }
+                                      }),
+                              content: Text(
+                                '모두 선택 (${visibleIds.length}명)',
+                                style: const TextStyle(fontSize: 12),
+                              ),
                             );
                           }),
                           const SizedBox(height: 8),

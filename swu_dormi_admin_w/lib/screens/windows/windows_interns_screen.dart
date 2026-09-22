@@ -10,6 +10,60 @@ import 'package:intl/intl.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_intern_notices_screen.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_cleaning_inspection_screen.dart' show kFloorOptions;
 
+/// 근무시간을 표시용 문자열로 변환한다. (층장앱 intern_log_screen.dart 의 _formatHours 와 동일 규칙)
+/// 22:00~24:00 심야 1.5배 가산으로 0.75시간처럼 소수점 둘째 자리가 필요한 값이 생기므로,
+/// 정수·1자리는 그대로, 그 외에는 둘째 자리까지 보여준다.
+String _formatHours(double hours) {
+  final rounded2 = (hours * 100).round() / 100;
+  if (rounded2 == rounded2.roundToDouble()) return rounded2.toStringAsFixed(0);
+  final rounded1 = (hours * 10).round() / 10;
+  if (rounded1 == rounded2) return rounded1.toStringAsFixed(1);
+  return rounded2.toStringAsFixed(2);
+}
+
+const _kNightStartMinutes = 22 * 60; // 22:00
+const _kNightEndMinutes = 24 * 60; // 24:00(자정)
+const _kNightMultiplier = 1.5;
+
+/// 'HH:mm' → 자정 기준 분. 실패 시 -1.
+int _parseHm(String? value) {
+  if (value == null) return -1;
+  final parts = value.split(':');
+  if (parts.length != 2) return -1;
+  final h = int.tryParse(parts[0]);
+  final m = int.tryParse(parts[1]);
+  if (h == null || m == null) return -1;
+  return h * 60 + m;
+}
+
+/// 근무시간을 '기본'과 '가산분(심야 22:00~24:00 1.5배로 추가된 시간)'으로 나눈다.
+/// (층장앱 intern_log_screen.dart 의 _calcHoursBreakdown 과 동일 규칙)
+({double base, double bonus}) _calcHoursBreakdown(String? startTime, String? endTime) {
+  final s = _parseHm(startTime);
+  final e = _parseHm(endTime);
+  if (s < 0 || e < 0 || e <= s) return (base: 0, bonus: 0);
+  final overlapStart = s < _kNightStartMinutes ? _kNightStartMinutes : s;
+  final overlapEnd = e > _kNightEndMinutes ? _kNightEndMinutes : e;
+  final nightMinutes = overlapEnd > overlapStart ? overlapEnd - overlapStart : 0;
+  final normalMinutes = (e - s) - nightMinutes;
+  final base = normalMinutes / 60.0 + nightMinutes / 60.0;
+  final bonus = (nightMinutes / 60.0) * (_kNightMultiplier - 1);
+  return (base: base, bonus: bonus);
+}
+
+/// 로그 하나의 인정 근무시간을 반환한다. 시작~종료 시각이 있으면 심야 가산을 포함해
+/// 실시간으로 다시 계산하고(옛 데이터에 저장된 workHours가 가산 반영 전 값일 수 있으므로),
+/// 없으면 저장된 workHours 를 그대로 쓴다. (층장앱 intern_log_screen.dart 의 _effectiveHours 와 동일 규칙)
+double _effectiveHours(Map<String, dynamic> log) {
+  final startTime = log['startTime'] as String?;
+  final endTime = log['endTime'] as String?;
+  if (_parseHm(startTime) >= 0 && _parseHm(endTime) >= 0) {
+    final b = _calcHoursBreakdown(startTime, endTime);
+    return b.base + b.bonus;
+  }
+  return (log['workHours'] as num?)?.toDouble() ?? 0;
+}
+
 void _showImagePreview(BuildContext context, String url) {
   showDialog(
     context: context,
@@ -134,10 +188,77 @@ class _WindowsInternsScreenState extends State<WindowsInternsScreen> {
   bool _isLoading = true;
   int _selectedTab = 0; // 0: 인턴정보, 1: 관내점검표, 2: 인턴근무일지
 
+  /// 층장 uid → 안 읽은 층장단톡 메시지 수
+  Map<String, int> _unreadByCaptain = {};
+  /// 층장 uid → 담당 구역 채팅방의 전체 메시지 수
+  Map<String, int> _totalByCaptain = {};
+
   @override
   void initState() {
     super.initState();
     _loadInterns();
+  }
+
+  /// 층장별 안 읽은 단톡 메시지 수를 계산한다.
+  ///
+  /// 방 문서 ID('샬롬하우스_A동_320호')에서 담당 구역 문자열을 만들어
+  /// assignedFloor 가 같은 층장에게 귀속시킨다. 본인이 보낸 메시지와
+  /// 이미 readBy 에 포함된 메시지는 제외한다.
+  Future<void> _loadUnreadCounts(List<UserModel> interns) async {
+    try {
+      // 담당 구역 → 층장 uid 목록
+      final captainsByFloor = <String, List<String>>{};
+      for (final it in interns) {
+        // 담당 구역은 계정 상수(kFloorCaptainAccounts)에서 가져온다.
+        final floor = (kFloorCaptainAccounts[it.email] ?? '').trim();
+        if (floor.isEmpty) continue;
+        captainsByFloor.putIfAbsent(floor, () => []).add(it.uid);
+      }
+      if (captainsByFloor.isEmpty) return;
+
+      final counts = <String, int>{};
+      final totals = <String, int>{};
+      final roomsSnap = await _firestore.collection('floor_chats').get();
+
+      for (final room in roomsSnap.docs) {
+        // 문서 ID 대신 저장된 roomId 필드를 우선 사용한다(한글 안정성).
+        final stored = (room.data()['roomId'] as String?) ?? room.id;
+        final parts = stored.split('_');
+        if (parts.length < 3) continue;
+        final dormBuilding = parts[0];
+        final wing = parts[1];
+        final digits = RegExp(r'\d+').firstMatch(parts[2])?.group(0);
+        if (digits == null) continue;
+        final floorNum = (int.tryParse(digits) ?? 0) ~/ 100;
+        final floorLabel = '$dormBuilding $wing $floorNum층';
+
+        final uids = captainsByFloor[floorLabel];
+        if (uids == null || uids.isEmpty) continue;
+
+        final msgs = await room.reference.collection('messages').get();
+        for (final uid in uids) {
+          totals[uid] = (totals[uid] ?? 0) + msgs.docs.length;
+          var n = 0;
+          for (final m in msgs.docs) {
+            final data = m.data();
+            if ((data['senderId'] as String?) == uid) continue;
+            final readBy =
+                (data['readBy'] as List<dynamic>?)?.cast<dynamic>() ?? const [];
+            if (!readBy.contains(uid)) n++;
+          }
+          if (n > 0) counts[uid] = n;
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _unreadByCaptain = counts;
+          _totalByCaptain = totals;
+        });
+      }
+    } catch (e) {
+      debugPrint('안 읽은 단톡 수 조회 오류: $e');
+    }
   }
 
   Future<void> _loadInterns() async {
@@ -150,11 +271,28 @@ class _WindowsInternsScreenState extends State<WindowsInternsScreen> {
       final interns = snap.docs
           .map((d) => UserModel.fromFirestore(d))
           .toList();
-      interns.sort((a, b) => a.email.compareTo(b.email));
+      // 학기중 → 방학 순으로 묶고, 같은 그룹 안에서는 구역 순서를 따른다.
+      // (구역 순서: 샬롬 A동 → B동 → 국생 → 바롬, kFloorOptions 기준)
+      int vacationRank(UserModel u) =>
+          (kFloorCaptainAccounts[u.email] ?? '').contains('(방학)') ? 1 : 0;
+      int floorRank(UserModel u) {
+        final floor = kFloorCaptainAccounts[u.email] ?? '';
+        final idx = kFloorOptions.indexOf(floor);
+        return idx == -1 ? kFloorOptions.length : idx;
+      }
+
+      interns.sort((a, b) {
+        final v = vacationRank(a).compareTo(vacationRank(b));
+        if (v != 0) return v;
+        final f = floorRank(a).compareTo(floorRank(b));
+        if (f != 0) return f;
+        return a.email.compareTo(b.email);
+      });
       setState(() {
         _allInterns = interns;
         _isLoading = false;
       });
+      _loadUnreadCounts(interns);
     } catch (e) {
       setState(() => _isLoading = false);
     }
@@ -232,7 +370,24 @@ class _WindowsInternsScreenState extends State<WindowsInternsScreen> {
         Expanded(
           child: ListView.builder(
             itemCount: interns.length,
-            itemBuilder: (context, i) => _buildRow(interns[i]),
+            itemBuilder: (context, i) {
+              // 학기중 → 방학 경계에 구분 헤더를 넣는다.
+              final isVacation = (kFloorCaptainAccounts[interns[i].email] ?? '')
+                  .contains('(방학)');
+              final prevIsVacation = i == 0
+                  ? false
+                  : (kFloorCaptainAccounts[interns[i - 1].email] ?? '')
+                      .contains('(방학)');
+              final showDivider = isVacation && !prevIsVacation;
+
+              if (!showDivider) return _buildRow(interns[i]);
+              return Column(
+                children: [
+                  _buildGroupHeader('방학'),
+                  _buildRow(interns[i]),
+                ],
+              );
+            },
           ),
         ),
         // 하단 카운트
@@ -248,6 +403,29 @@ class _WindowsInternsScreenState extends State<WindowsInternsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 학기중/방학 구분 헤더
+  Widget _buildGroupHeader(String label) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF5F5F5),
+        border: Border(
+          top: BorderSide(color: Color(0xFF000000), width: 2),
+          bottom: BorderSide(color: Color(0xFF000000), width: 2),
+        ),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontSize: 24,
+          fontWeight: FontWeight.bold,
+          color: Color(0xFF000000),
+        ),
+      ),
     );
   }
 
@@ -288,8 +466,44 @@ class _WindowsInternsScreenState extends State<WindowsInternsScreen> {
             ),
             Expanded(
               flex: 2,
-              child: Text(intern.email,
-                  style: TextStyle(fontSize: 13, color: Colors.grey[120])),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(intern.email,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: Colors.grey[120])),
+                  ),
+                  // 안 읽은 층장단톡 메시지 수(빨간 배지)
+                  if ((_unreadByCaptain[intern.uid] ?? 0) > 0) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text(
+                        '${_unreadByCaptain[intern.uid]}',
+                        style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFFFFFFFF),
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                  // 담당 구역 채팅방의 전체 메시지 수
+                  if ((_totalByCaptain[intern.uid] ?? 0) > 0) ...[
+                    const SizedBox(width: 6),
+                    Icon(FluentIcons.chat, size: 12, color: Colors.grey[110]),
+                    const SizedBox(width: 2),
+                    Text(
+                      '${_totalByCaptain[intern.uid]}',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[110]),
+                    ),
+                  ],
+                ],
+              ),
             ),
             Expanded(
               flex: 2,
@@ -1241,13 +1455,8 @@ class _InternLogTabState extends State<_InternLogTab> {
         data['_id'] = d.id;
         return data;
       }).toList();
-      docs.sort((a, b) {
-        final aT =
-            (a['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
-        final bT =
-            (b['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
-        return bT.compareTo(aT);
-      });
+      // 최신순 표시. 누적 계산과 같은 기준을 쓰도록 _logCompare 를 뒤집는다.
+      docs.sort((a, b) => -_logCompare(a, b));
       if (mounted) setState(() { _logs = docs; _isLoading = false; });
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
@@ -1257,9 +1466,39 @@ class _InternLogTabState extends State<_InternLogTab> {
   double get _totalHours {
     double total = 0;
     for (final log in _logs) {
-      total += (log['workHours'] as num?)?.toDouble() ?? 0;
+      total += _effectiveHours(log);
     }
     return total;
+  }
+
+  /// 근무일지 정렬 기준: 날짜 → 시작시간 → 문서 id (오름차순).
+  /// 표시(_load)는 뒤집어 최신순, 누적 계산(_runningTotals)은 그대로 — 두 곳이 일치해야 한다.
+  static int _logCompare(Map<String, dynamic> a, Map<String, dynamic> b) {
+    final aT = (a['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
+    final bT = (b['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
+    final aDay = DateTime(aT.year, aT.month, aT.day);
+    final bDay = DateTime(bT.year, bT.month, bT.day);
+    final byDay = aDay.compareTo(bDay);
+    if (byDay != 0) return byDay;
+    final aStart = (a['startTime'] as String?) ?? '';
+    final bStart = (b['startTime'] as String?) ?? '';
+    final byStart = aStart.compareTo(bStart);
+    if (byStart != 0) return byStart;
+    return (a['_id'] as String? ?? '').compareTo(b['_id'] as String? ?? '');
+  }
+
+  /// 문서 id → '그 날짜까지의 누적시간'. 저장된 workHours/accumulatedHours 는 심야 가산
+  /// 반영 전의 옛 스냅샷일 수 있으므로 쓰지 않고, 시작~종료 시각으로 매번 다시 계산해
+  /// 날짜순으로 실시간 합산한다.
+  Map<String, double> _runningTotals() {
+    final sorted = [..._logs]..sort(_logCompare);
+    final result = <String, double>{};
+    double running = 0;
+    for (final log in sorted) {
+      running += _effectiveHours(log);
+      result[log['_id'] as String] = running;
+    }
+    return result;
   }
 
   @override
@@ -1287,7 +1526,7 @@ class _InternLogTabState extends State<_InternLogTab> {
               ),
               const Spacer(),
               Text(
-                '누적 ${_totalHours.toStringAsFixed(1)}시간',
+                '누적 ${_formatHours(_totalHours)}시간',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
@@ -1313,29 +1552,36 @@ class _InternLogTabState extends State<_InternLogTab> {
           )
         else
           Expanded(
-            child: ListView.separated(
-              padding: const EdgeInsets.all(12),
-              itemCount: _logs.length,
-              separatorBuilder: (context, i2) => const SizedBox(height: 8),
-              itemBuilder: (_, i) => _buildCard(_logs[i]),
-            ),
+            child: Builder(builder: (context) {
+              final running = _runningTotals();
+              return ListView.separated(
+                padding: const EdgeInsets.all(12),
+                itemCount: _logs.length,
+                separatorBuilder: (context, i2) => const SizedBox(height: 8),
+                itemBuilder: (_, i) =>
+                    _buildCard(_logs[i], running[_logs[i]['_id']] ?? 0),
+              );
+            }),
           ),
       ],
     );
   }
 
-  Widget _buildCard(Map<String, dynamic> log) {
+  Widget _buildCard(Map<String, dynamic> log, double accHours) {
     final workDate =
         (log['workDate'] as Timestamp?)?.toDate();
     final startTime = log['startTime'] as String?;
     final endTime = log['endTime'] as String?;
     final workHours =
         (log['workHours'] as num?)?.toDouble();
-    final accHours =
-        (log['accumulatedHours'] as num?)?.toDouble();
     final workTypes = log['workTypes'] is List
         ? (log['workTypes'] as List).map((e) => e as String).toList()
         : <String>[];
+
+    // 저장된 workHours 는 이미 심야 가산이 반영된 합계이므로, 시작~종료 시각으로
+    // 기본/가산 분을 다시 나눠 뱃지에 "0.5+0.25(가산)" 형태로 보여준다.
+    final breakdown = _calcHoursBreakdown(startTime, endTime);
+    final hasBonus = breakdown.bonus > 0;
 
     return Card(
       padding: const EdgeInsets.all(12),
@@ -1370,7 +1616,9 @@ class _InternLogTabState extends State<_InternLogTab> {
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    '${workHours.toStringAsFixed(1)}시간',
+                    hasBonus
+                        ? '${_formatHours(breakdown.base)}+${_formatHours(breakdown.bonus)}(가산)'
+                        : '${_formatHours(workHours)}시간',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
@@ -1390,6 +1638,13 @@ class _InternLogTabState extends State<_InternLogTab> {
                   style: TextStyle(fontSize: 12, color: Colors.grey[100]),
                 ),
               ],
+            ),
+          ],
+          if (hasBonus) ...[
+            const SizedBox(height: 4),
+            Text(
+              '22:00~24:00 근무는 1.5배 인정 (가산 ${_formatHours(breakdown.bonus)}시간)',
+              style: TextStyle(fontSize: 11, color: Colors.blue.withValues(alpha: 0.7)),
             ),
           ],
           if (workTypes.isNotEmpty) ...[
@@ -1414,19 +1669,17 @@ class _InternLogTabState extends State<_InternLogTab> {
                   .toList(),
             ),
           ],
-          if (accHours != null) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(FluentIcons.timer, size: 12, color: Colors.grey[80]),
-                const SizedBox(width: 4),
-                Text(
-                  '누적 ${accHours.toStringAsFixed(1)}시간',
-                  style: TextStyle(fontSize: 12, color: Colors.grey[100]),
-                ),
-              ],
-            ),
-          ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(FluentIcons.timer, size: 12, color: Colors.grey[80]),
+              const SizedBox(width: 4),
+              Text(
+                '누적 ${_formatHours(accHours)}시간',
+                style: TextStyle(fontSize: 12, color: Colors.grey[100]),
+              ),
+            ],
+          ),
         ],
       ),
     );

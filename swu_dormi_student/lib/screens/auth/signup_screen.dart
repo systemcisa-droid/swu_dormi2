@@ -39,6 +39,21 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _isLoading = true);
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+
+    // 이메일 아이디가 곧 학번이다. 관리프로그램이 올린 사생 명단에 없으면 팝업으로 안내하고 가입하지 않는다.
+    // (명단 조회 자체가 실패하면 여기서 막지 않고, 가입 처리 단계의 검사에 맡긴다.)
+    final studentId = _emailIdController.text.trim();
+    bool inRoster = true;
+    try {
+      inRoster = await authProvider.isStudentIdInRoster(studentId);
+    } catch (_) {}
+    if (!mounted) return;
+    if (!inRoster) {
+      setState(() => _isLoading = false);
+      await _showStudentIdNotInRosterDialog();
+      return;
+    }
+
     final error = await authProvider.signUp(
       email: '${_emailIdController.text}@swu.ac.kr',
       password: _passwordController.text,
@@ -61,6 +76,23 @@ class _SignupScreenState extends State<SignupScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _showStudentIdNotInRosterDialog() {
+    final s = SignupStrings(Provider.of<LocaleProvider>(context, listen: false).isEnglish);
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.studentIdNotInRosterTitle),
+        content: Text(s.studentIdNotInRosterBody),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.studentIdNotInRosterOk),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

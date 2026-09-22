@@ -46,6 +46,8 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
   String? _selectedUserDormBuilding;
   String _filterStatus = '전체';
   String? _filterFloor;
+  /// 통계 칩 탭 (0 = 학기중, 1 = 방학)
+  int _statTabIndex = 0;
   String? _filterCategory;
   late Stream<QuerySnapshot> _reportsStream;
   Map<String, Map<String, String>> _userInfoMap = {};
@@ -224,11 +226,17 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
     } catch (_) {}
   }
 
+  /// '대기중 + 처리중' 처럼 여러 상태를 함께 보는 필터 값
+  static const String _kPendingInProgress = 'pending_in_progress';
+
   void _loadReports() {
     setState(() {
-      _reportsStream = _filterStatus == '전체'
-          ? _firestoreService.getFacilityReports()
-          : _firestoreService.getFacilityReports(status: _filterStatus);
+      // 복합 상태는 Firestore isEqualTo 로 못 거르므로 전체를 받아
+      // 아래 목록 렌더링 시 클라이언트에서 필터링한다.
+      _reportsStream =
+          (_filterStatus == '전체' || _filterStatus == _kPendingInProgress)
+              ? _firestoreService.getFacilityReports()
+              : _firestoreService.getFacilityReports(status: _filterStatus);
     });
   }
 
@@ -243,7 +251,13 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
       return '';
     }
 
-    if (dormBuilding == '바롬인성교육관') return '바롬인성교육관 10층';
+    // 바롬인성교육관: 호실번호가 '1001-A' 형식이므로 '-' 앞부분(호실 베이스)까지 구분한다.
+    if (dormBuilding == '바롬인성교육관') {
+      final base = roomNumber.contains('-') ? roomNumber.split('-').first : '';
+      return base.isNotEmpty
+          ? '바롬인성교육관 10층 $base호'
+          : '바롬인성교육관 10층';
+    }
 
     // 샬롬하우스: 저장된 building(A동/B동) + 방 번호에서 층 계산
     if (dormBuilding == '샬롬하우스' && roomNum != null && building.isNotEmpty) {
@@ -252,17 +266,17 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
       if (floor >= 1 && floor <= 7) return '샬롬하우스 $building ${floor}층';
     }
 
-    if (dormBuilding == '샬롬하우스(겨울방학)' && roomNum != null) {
+    if (dormBuilding == '샬롬하우스(방학)' && roomNum != null) {
       final floor = roomNum ~/ 100;
-      if (floor >= 5 && floor <= 7) return '샬롬하우스(겨울방학) A동 ${floor}층';
+      if (floor >= 2 && floor <= 7) return '샬롬하우스(방학) A동 ${floor}층';
     }
 
-    // 국제생활관(겨울방학)은 국제생활관과 동일한 호실 번호 체계를 쓴다.
-    if (dormBuilding == '국제생활관(겨울방학)' && roomNum != null) {
-      if (roomNum >= 101 && roomNum <= 132) return '국제생활관(겨울방학) A동 1층';
-      if (roomNum >= 201 && roomNum <= 229) return '국제생활관(겨울방학) A동 2층';
-      if (roomNum >= 233 && roomNum <= 260) return '국제생활관(겨울방학) B동 2층';
-      if (roomNum >= 301 && roomNum <= 329) return '국제생활관(겨울방학) B동 3층';
+    // 국제생활관(방학)은 국제생활관과 동일한 호실 번호 체계를 쓴다.
+    if (dormBuilding == '국제생활관(방학)' && roomNum != null) {
+      if (roomNum >= 101 && roomNum <= 132) return '국제생활관(방학) A동 1층';
+      if (roomNum >= 201 && roomNum <= 229) return '국제생활관(방학) A동 2층';
+      if (roomNum >= 233 && roomNum <= 260) return '국제생활관(방학) B동 2층';
+      if (roomNum >= 301 && roomNum <= 329) return '국제생활관(방학) B동 3층';
       return '';
     }
 
@@ -350,6 +364,43 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
       return result;
     }
 
+    /// 학기중 / 방학 탭. 선택된 탭의 구역 칩만 아래에 표시된다.
+    Widget statTab(int index, String label, int count) {
+      final isSelected = _statTabIndex == index;
+      final accent = FluentTheme.of(context).accentColor;
+      return GestureDetector(
+        onTap: () => setState(() {
+          if (_statTabIndex == index) return;
+          _statTabIndex = index;
+          // 탭을 바꾸면 이전 탭의 구역 필터는 칩이 사라지므로 함께 해제한다.
+          _filterFloor = null;
+          _selectedReport = null;
+        }),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          decoration: BoxDecoration(
+            color: isSelected ? accent.withValues(alpha: 0.12) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: isSelected
+                  ? accent
+                  : FluentTheme.of(context).resources.dividerStrokeColorDefault,
+              width: isSelected ? 1.5 : 1.0,
+            ),
+          ),
+          child: Text(
+            '$label $count건',
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+              color: isSelected ? accent : Colors.grey[100],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
@@ -365,56 +416,70 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
         children: [
           // 전체
           scrollRow(withSep([chip('전체', null)])),
+          const SizedBox(height: 10),
+          // 학기중 / 방학 탭
+          scrollRow([
+            statTab(
+                0,
+                '학기중',
+                countForArea('샬롬하우스 ') +
+                    countForArea('국제생활관 ') +
+                    countForArea('바롬인성교육관')),
+            const SizedBox(width: 8),
+            statTab(
+                1,
+                '방학',
+                countForArea('샬롬하우스(방학)') +
+                    countForArea('국제생활관(방학)')),
+          ]),
+          if (_statTabIndex == 0) ...[
           const SizedBox(height: 8),
           // 샬롬하우스 A동
           scrollRow(withSep([
-            chip('샬롬하우스 A동', '샬롬하우스 A동'),
+            chip('샬롬 A', '샬롬하우스 A동'),
             for (final f in kFloorOptions.where((f) => f.startsWith('샬롬하우스 A동')))
               chip(f.replaceFirst('샬롬하우스 A동 ', ''), f),
           ])),
           const SizedBox(height: 8),
           // 샬롬하우스 B동
           scrollRow(withSep([
-            chip('샬롬하우스 B동', '샬롬하우스 B동'),
+            chip('샬롬 B', '샬롬하우스 B동'),
             for (final f in kFloorOptions.where((f) => f.startsWith('샬롬하우스 B동')))
               chip(f.replaceFirst('샬롬하우스 B동 ', ''), f),
           ])),
           const SizedBox(height: 8),
-          // 국제생활관 A동
+          // 국제생활관 (A동/B동을 한 줄로 표시)
           scrollRow(withSep([
-            chip('국제생활관 A동', '국제생활관 A동'),
-            for (final f in kFloorOptions.where((f) => f.startsWith('국제생활관 A동')))
-              chip(f.replaceFirst('국제생활관 A동 ', ''), f),
+            chip('국제생활관', '국제생활관 '),
+            for (final f in kFloorOptions.where((f) => f.startsWith('국제생활관 ')))
+              chip(f.replaceFirst('국제생활관 ', ''), f),
           ])),
           const SizedBox(height: 8),
-          // 국제생활관 B동
+          // 바롬인성교육관 (10층 요약 + 1001/1002/1003호 개별)
           scrollRow(withSep([
-            chip('국제생활관 B동', '국제생활관 B동'),
-            for (final f in kFloorOptions.where((f) => f.startsWith('국제생활관 B동')))
-              chip(f.replaceFirst('국제생활관 B동 ', ''), f),
+            chip('바롬인성교육관 10층', '바롬인성교육관 10층'),
+            for (final base in const ['1001', '1002', '1003'])
+              chip('$base호', '바롬인성교육관 10층 $base호'),
           ])),
+          ],
+          if (_statTabIndex == 1) ...[
           const SizedBox(height: 8),
-          // 바롬인성교육관
+          // 샬롬하우스(방학)
           scrollRow(withSep([
-            for (final f in kFloorOptions.where((f) => f.startsWith('바롬인성교육관')))
-              chip(f, f),
-          ])),
-          const SizedBox(height: 8),
-          // 샬롬하우스(겨울방학)
-          scrollRow(withSep([
-            chip('샬롬하우스 A동(겨울방학)', '샬롬하우스(겨울방학) A동'),
+            chip('샬롬A(방학)', '샬롬하우스(방학) A동'),
             for (final f in kFloorOptions
-                .where((f) => f.startsWith('샬롬하우스(겨울방학) A동')))
-              chip(f.replaceFirst('샬롬하우스(겨울방학) ', ''), f),
+                .where((f) => f.startsWith('샬롬하우스(방학) A동')))
+              chip(f.replaceFirst('샬롬하우스(방학) A동 ', ''), f),
           ])),
           const SizedBox(height: 8),
-          // 국제생활관(겨울방학)
+          // 국제생활관(방학)
           scrollRow(withSep([
-            chip('국생(겨울방학)', '국제생활관(겨울방학)'),
+            chip('국생(방학)', '국제생활관(방학)'),
             for (final f in kFloorOptions
-                .where((f) => f.startsWith('국제생활관(겨울방학)')))
-              chip(f.replaceFirst('국제생활관(겨울방학) ', ''), f),
+                .where((f) => f.startsWith('국제생활관(방학)')))
+              chip(f.replaceFirst('국제생활관(방학) ', ''), f),
           ])),
+          ],
         ],
       ),
     );
@@ -455,13 +520,16 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
 
   void _showStatusChangeDialog(FacilityReportModel report) {
     String selectedStatus = report.status;
+    String selectedCategory = report.category;
     final noteController = TextEditingController(text: report.technicianNote ?? '');
 
     showDialog(
       context: context,
       builder: (dialogContext) => ContentDialog(
         title: const Text('상태 변경'),
-        content: Container(
+        // ComboBox 선택이 다이얼로그 안에서 바로 반영되도록 한다.
+        content: StatefulBuilder(
+          builder: (context, setDialogState) => Container(
           width: 500,
           padding: const EdgeInsets.symmetric(vertical: 16),
           child: Column(
@@ -480,7 +548,26 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                 ],
                 onChanged: (value) {
                   if (value != null) {
-                    selectedStatus = value;
+                    setDialogState(() => selectedStatus = value);
+                  }
+                },
+              ),
+              const SizedBox(height: 24),
+              // 분류 선택 (학생이 잘못 고른 경우 관리자가 정정)
+              const Text('분류', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              ComboBox<String>(
+                value: selectedCategory,
+                items: const [
+                  ComboBoxItem(value: 'plumbing', child: Text('수도/냉난방')),
+                  ComboBoxItem(value: 'maintenance', child: Text('가구/도어')),
+                  ComboBoxItem(value: 'electrical', child: Text('전기')),
+                  ComboBoxItem(value: 'common_area', child: Text('공동구역')),
+                  ComboBoxItem(value: 'other', child: Text('기타')),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setDialogState(() => selectedCategory = value);
                   }
                 },
               ),
@@ -494,6 +581,7 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                 maxLines: 5,
               ),
             ],
+          ),
           ),
         ),
         actions: [
@@ -526,6 +614,7 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                   report.id,
                   selectedStatus,
                   noteController.text.trim().isEmpty ? null : noteController.text.trim(),
+                  category: selectedCategory,
                 );
 
                 if (!mounted) return;
@@ -644,45 +733,26 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ComboBox<String>(
-                                value: _filterFloor ?? '전체',
-                                isExpanded: true,
-                                items: [
-                                  const ComboBoxItem(value: '전체', child: Text('전체 구역')),
-                                  ...kFloorOptions.map((f) => ComboBoxItem(value: f, child: Text(f))),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _filterFloor = (value == '전체') ? null : value;
-                                    _selectedReport = null;
-                                  });
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ComboBox<String>(
-                                value: _filterStatus,
-                                isExpanded: true,
-                                items: const [
-                                  ComboBoxItem(value: '전체', child: Text('전체 상태')),
-                                  ComboBoxItem(value: 'pending', child: Text('대기중')),
-                                  ComboBoxItem(value: 'in_progress', child: Text('처리중')),
-                                  ComboBoxItem(value: 'completed', child: Text('완료됨')),
-                                ],
-                                onChanged: (value) {
-                                  setState(() {
-                                    _filterStatus = value ?? '전체';
-                                    _selectedReport = null;
-                                  });
-                                  _loadReports();
-                                },
-                              ),
-                            ),
+                        // 구역 필터는 위 통계 뱃지로 대체되어 제거됨
+                        ComboBox<String>(
+                          value: _filterStatus,
+                          isExpanded: true,
+                          items: const [
+                            ComboBoxItem(value: '전체', child: Text('전체 상태')),
+                            ComboBoxItem(
+                                value: 'pending_in_progress',
+                                child: Text('대기중 + 처리중')),
+                            ComboBoxItem(value: 'pending', child: Text('대기중')),
+                            ComboBoxItem(value: 'in_progress', child: Text('처리중')),
+                            ComboBoxItem(value: 'completed', child: Text('완료됨')),
                           ],
+                          onChanged: (value) {
+                            setState(() {
+                              _filterStatus = value ?? '전체';
+                              _selectedReport = null;
+                            });
+                            _loadReports();
+                          },
                         ),
                         const SizedBox(height: 8),
                         // 카테고리 칩 필터
@@ -736,6 +806,15 @@ class _WindowsFacilitiesScreenState extends State<WindowsFacilitiesScreen> {
                             final area = _floorArea(dormBuilding, r.roomNumber, building);
                             return area.startsWith(_filterFloor!);
                           }).toList();
+                        }
+
+                        // 복합 상태 필터 적용 (Firestore 쿼리로 못 거르는 경우)
+                        if (_filterStatus == _kPendingInProgress) {
+                          reports = reports
+                              .where((r) =>
+                                  r.status == 'pending' ||
+                                  r.status == 'in_progress')
+                              .toList();
                         }
 
                         // 카테고리 필터 적용

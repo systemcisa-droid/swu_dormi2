@@ -169,6 +169,11 @@ class AuthProvider extends ChangeNotifier {
     return _authService.isStudentIdAvailable(studentId);
   }
 
+  // 관리프로그램이 올린 사생 명단에 있는 학번인지 확인한다. true면 가입 가능.
+  Future<bool> isStudentIdInRoster(String studentId) {
+    return _authService.isStudentIdInRoster(studentId);
+  }
+
   // 반환값: null이면 취소(사용자가 팝업을 닫음), 문자열이면 에러 메시지.
   // 성공 시에는 authStateChanges 리스너가 _currentUser 또는 _pendingGoogleUid를 채운다.
   Future<String?> signInWithGoogle() async {

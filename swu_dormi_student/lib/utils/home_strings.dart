@@ -24,6 +24,22 @@ class HomeStrings {
       'Would you like to go to the dormitory rules page now?');
   String get regulationRequiredClose => _t('닫기', 'Close');
   String get regulationRequiredGo => _t('이동', 'Go');
+
+  // 내 QR 코드 — 프로필(기숙사 건물·호실·자리 번호) 미등록 안내
+  String get profileRequiredTitle =>
+      _t('프로필 정보 필요', 'Profile Info Required');
+  String profileRequiredContent(String missing) => _t(
+      '내 QR 코드는 프로필에 기숙사 건물, 호실, 자리 번호가 모두 등록된 후 이용할 수 있습니다.\n\n'
+      '미등록 항목: $missing\n\n'
+      '지금 프로필 페이지로 이동하시겠습니까?',
+      'My QR code is available after your dormitory building, room number and seat number are registered in your profile.\n\n'
+      'Missing: $missing\n\n'
+      'Would you like to go to your profile now?');
+  String get profileRequiredClose => _t('닫기', 'Close');
+  String get profileRequiredGo => _t('이동', 'Go');
+  String get profileFieldDormBuilding => _t('기숙사 건물', 'Dormitory building');
+  String get profileFieldRoomNumber => _t('호실', 'Room number');
+  String get profileFieldSeatNumber => _t('자리 번호', 'Seat number');
   String get menuCleaningInspection => _t('단위실 청소점검', 'Room Cleaning Inspection');
   String get menuCleaningMonthly => _t('월 검사/퇴사 검사', 'Monthly/Move-out Inspection');
   String get menuMoveOutCheck => _t('퇴사 확인', 'Move-out Confirmation');

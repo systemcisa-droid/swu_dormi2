@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
@@ -8,10 +9,12 @@ import 'package:image_picker/image_picker.dart';
 import '../../services/auth_service.dart';
 import 'chat_media.dart';
 import 'chat_upload.dart';
-// captainFloor: "샬롬하우스 A동 3층"
-// roomId:       "샬롬하우스_A동_301호"
+// captainFloor: "샬롬하우스 A동 3층"      → roomId: "샬롬하우스_A동_301호"
+// captainFloor: "바롬인성교육관 10층"      → roomId: "바롬인성교육관_1001-A호" (동 없음)
 String _toRoomId(String dormBuilding, String building, String roomNumber) =>
-    '${dormBuilding}_${building}_$roomNumber호';
+    building.isEmpty
+        ? '${dormBuilding}_$roomNumber호'
+        : '${dormBuilding}_${building}_$roomNumber호';
 
 Future<String?> _getAssignedFloor() async {
   final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -21,17 +24,19 @@ Future<String?> _getAssignedFloor() async {
 }
 
 // "샬롬하우스 A동 3층" → (dormBuilding: "샬롬하우스", building: "A동", floorNum: 3)
+// "바롬인성교육관 10층" → (dormBuilding: "바롬인성교육관", building: "", floorNum: 10)
+//   바롬인성교육관은 동(wing) 구분이 없고 호실이 '1001-A' 형식이다.
 ({String dormBuilding, String building, int floorNum})? _parseFloor(String assignedFloor) {
   final wingMatch = RegExp(r'[A-Z]동').firstMatch(assignedFloor);
   final floorMatch = RegExp(r'(\d+)층').firstMatch(assignedFloor);
 
   String dormBuilding;
-  if (assignedFloor.startsWith('샬롬하우스(겨울방학)')) {
-    dormBuilding = '샬롬하우스(겨울방학)';
+  if (assignedFloor.startsWith('샬롬하우스(방학)')) {
+    dormBuilding = '샬롬하우스(방학)';
   } else if (assignedFloor.startsWith('샬롬하우스')) {
     dormBuilding = '샬롬하우스';
-  } else if (assignedFloor.startsWith('국제생활관(겨울방학)')) {
-    dormBuilding = '국제생활관(겨울방학)';
+  } else if (assignedFloor.startsWith('국제생활관(방학)')) {
+    dormBuilding = '국제생활관(방학)';
   } else if (assignedFloor.startsWith('국제생활관')) {
     dormBuilding = '국제생활관';
   } else if (assignedFloor.startsWith('바롬인성교육관')) {
@@ -42,7 +47,9 @@ Future<String?> _getAssignedFloor() async {
 
   final building = wingMatch?.group(0) ?? ''; // e.g. "A동"
   final floorNum = floorMatch != null ? int.tryParse(floorMatch.group(1)!) ?? 0 : 0;
-  if (building.isEmpty || floorNum == 0) return null;
+  if (floorNum == 0) return null;
+  // 바롬인성교육관은 동이 없어도 되지만, 그 외 건물은 동이 필수다.
+  if (dormBuilding != '바롬인성교육관' && building.isEmpty) return null;
   return (dormBuilding: dormBuilding, building: building, floorNum: floorNum);
 }
 
@@ -83,29 +90,59 @@ class _RoomListScreenState extends State<_RoomListScreen> {
     _loadRooms();
   }
 
+  /// 호실 번호에서 동(A동/B동)을 계산한다. 저장된 building 필드('미배정' 등)를 믿지 않는다.
+  /// 국제생활관: 101~132·201~229 = A동 / 233~260·301~329 = B동
+  /// 샬롬하우스: 층내 01~20 = A동 / 21~35 = B동
+  String? _wingFromRoom(String dormBuilding, int roomNum) {
+    if (roomNum == 0) return null;
+    if (dormBuilding.startsWith('국제생활관')) {
+      if ((roomNum >= 101 && roomNum <= 132) || (roomNum >= 201 && roomNum <= 229)) return 'A동';
+      if ((roomNum >= 233 && roomNum <= 260) || (roomNum >= 301 && roomNum <= 329)) return 'B동';
+      return null;
+    }
+    if (dormBuilding.startsWith('샬롬하우스')) {
+      final last = roomNum % 100;
+      if (last >= 1 && last <= 20) return 'A동';
+      if (last >= 21 && last <= 35) return 'B동';
+      return null;
+    }
+    return null;
+  }
+
   Future<void> _loadRooms() async {
     if (_parsed == null) {
       setState(() => _loading = false);
       return;
     }
     try {
-      var query = _firestore
+      // building 필드는 '미배정'으로 저장된 경우가 있어 필터에 쓰지 않고,
+      // dormBuilding + role 로만 조회한 뒤 호실 번호로 동/층을 직접 판정한다.
+      final snap = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'student')
-          .where('dormBuilding', isEqualTo: _parsed!.dormBuilding);
-
-      if (_parsed!.building.isNotEmpty) {
-        query = query.where('building', isEqualTo: _parsed!.building);
-      }
-
-      final snap = await query.orderBy('roomNumber').get();
+          .where('dormBuilding', isEqualTo: _parsed!.dormBuilding)
+          .orderBy('roomNumber')
+          .get();
 
       final rooms = <String>{};
+      final isBarom = _parsed!.dormBuilding == '바롬인성교육관';
       for (final doc in snap.docs) {
         final room = doc.data()['roomNumber'] as String? ?? '';
         if (room.isEmpty || room == '000') continue;
-        final floorNum = int.tryParse(room) ?? 0;
-        if ((floorNum ~/ 100) == _parsed!.floorNum) {
+        if (isBarom) {
+          // 바롬인성교육관 호실: '1001-A' 형식. '-' 앞 숫자의 층(1001~1003 → 10층)으로 필터.
+          final base = int.tryParse(room.split('-').first) ?? 0;
+          if (base ~/ 100 == _parsed!.floorNum) {
+            rooms.add(room);
+          }
+        } else {
+          final floorNum = int.tryParse(room) ?? 0;
+          if ((floorNum ~/ 100) != _parsed!.floorNum) continue;
+          // 담당 구역에 동이 지정돼 있으면 호실 번호로 계산한 동과 일치할 때만 포함.
+          if (_parsed!.building.isNotEmpty &&
+              _wingFromRoom(_parsed!.dormBuilding, floorNum) != _parsed!.building) {
+            continue;
+          }
           rooms.add(room);
         }
       }
@@ -380,6 +417,10 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
   /// 첨부 업로드 진행 상태 (압축/업로드 중 입력창에 표시)
   final _uploadingNotifier = ValueNotifier<String?>(null);
   int _prevDocCount = 0;
+
+  /// 답장 대상으로 지정된 메시지 (스와이프로 선택)
+  final ValueNotifier<Map<String, dynamic>?> _replyTargetNotifier =
+      ValueNotifier(null);
 
   /// 내가 차단한 사용자 uid 목록. 이 사용자들의 메시지는 표시하지 않는다.
   List<String> _blockedUsers = [];
@@ -658,12 +699,23 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
   }
 
   Future<void> _loadMemberCount() async {
-    // roomId 예: '샬롬하우스_A동_320호'
+    // roomId 예: '샬롬하우스_A동_320호'  /  '바롬인성교육관_1001-A호' (동 없음)
     final parts = widget.roomId.split('_');
-    if (parts.length < 3) return;
+    if (parts.length < 2) return;
     final dormBuilding = parts[0];
-    final wing = parts[1];
-    final roomNumber = RegExp(r'\d+').firstMatch(parts[2])?.group(0) ?? '';
+    final isBarom = dormBuilding.startsWith('바롬인성교육관');
+
+    // 학생 조회에 쓸 roomNumber. 바롬은 '1001-A' 처럼 접미사까지 포함한다.
+    final String roomNumber;
+    final String? wing;
+    if (isBarom) {
+      wing = null;
+      roomNumber = parts[1].replaceFirst('호', ''); // '1001-A호' → '1001-A'
+    } else {
+      if (parts.length < 3) return;
+      wing = parts[1];
+      roomNumber = RegExp(r'\d+').firstMatch(parts[2])?.group(0) ?? '';
+    }
     if (roomNumber.isEmpty) return;
 
     try {
@@ -684,11 +736,16 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
           .toList()
         ..sort();
 
-      final floorNum = (int.tryParse(roomNumber) ?? 0) ~/ 100;
+      final floorNum = isBarom
+          ? (int.tryParse(roomNumber.split('-').first) ?? 0) ~/ 100
+          : (int.tryParse(roomNumber) ?? 0) ~/ 100;
+      final assignedFloorKey = isBarom
+          ? '$dormBuilding $floorNum층'
+          : '$dormBuilding $wing $floorNum층';
       final captainsSnap = await _firestore
           .collection('users')
           .where('role', isEqualTo: 'admin_m')
-          .where('assignedFloor', isEqualTo: '$dormBuilding $wing $floorNum층')
+          .where('assignedFloor', isEqualTo: assignedFloorKey)
           .get();
 
       if (mounted) {
@@ -709,8 +766,22 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     _scrollCtrl.dispose();
     _sendingNotifier.dispose();
     _uploadingNotifier.dispose();
+    _replyTargetNotifier.dispose();
     super.dispose();
   }
+
+  /// 메시지를 좌측으로 스와이프하면 답장 대상으로 지정한다.
+  void _setReplyTarget(Map<String, dynamic> data) {
+    HapticFeedback.selectionClick();
+    _replyTargetNotifier.value = {
+      'senderName': data['senderName'] as String? ?? '',
+      'roomNumber': data['roomNumber'] as String? ?? '',
+      'text': data['text'] as String? ?? '',
+      'mediaType': data['mediaType'] as String?,
+    };
+  }
+
+  void _clearReplyTarget() => _replyTargetNotifier.value = null;
 
   Future<void> _markAllRead() async {
     final captainUid = FirebaseAuth.instance.currentUser?.uid;
@@ -740,10 +811,12 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
   }
 
   // 00:30 ~ 09:00 사용 불가
+  // ⚠️ 임시 해제 (사용자 요청) — 몇 시간 후 아래 원본 로직으로 복귀할 것.
   bool _isRestrictedTime() {
-    final now = TimeOfDay.now();
-    final minutes = now.hour * 60 + now.minute;
-    return minutes >= 30 && minutes < 9 * 60; // 00:30(30) ~ 09:00(540)
+    return false;
+    // final now = TimeOfDay.now();
+    // final minutes = now.hour * 60 + now.minute;
+    // return minutes >= 30 && minutes < 9 * 60; // 00:30(30) ~ 09:00(540)
   }
 
   /// 첨부(사진/영상) 선택 → 압축 → 업로드 → 메시지 전송
@@ -786,6 +859,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
         isVideo: isVideo,
       );
 
+      final replyTo = _replyTargetNotifier.value;
+
       await _firestore
           .collection('floor_chats')
           .doc(widget.roomId)
@@ -799,6 +874,7 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
         'roomNumber': '층장',
         'createdAt': FieldValue.serverTimestamp(),
         'readBy': [captainUid],
+        if (replyTo != null) 'replyTo': replyTo,
       });
 
       await _firestore.collection('floor_chats').doc(widget.roomId).set({
@@ -806,6 +882,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
         'lastAt': FieldValue.serverTimestamp(),
         'roomId': widget.roomId,
       }, SetOptions(merge: true));
+
+      _clearReplyTarget();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -856,6 +934,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     // 전송 버튼만 비활성화 — setState로 전체 rebuild 없이 ValueNotifier 사용
     _sendingNotifier.value = true;
     try {
+      final replyTo = _replyTargetNotifier.value;
+
       await _firestore
           .collection('floor_chats')
           .doc(widget.roomId)
@@ -867,6 +947,7 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
         'roomNumber': '층장',
         'createdAt': FieldValue.serverTimestamp(),
         'readBy': [captainUid],
+        if (replyTo != null) 'replyTo': replyTo,
       });
 
       await _firestore.collection('floor_chats').doc(widget.roomId).set({
@@ -876,6 +957,7 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
       }, SetOptions(merge: true));
 
       _msgCtrl.clear();
+      _clearReplyTarget();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -1028,6 +1110,7 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             final text = data['text'] as String? ?? '';
             final mediaUrl = data['mediaUrl'] as String?;
             final mediaType = data['mediaType'] as String?;
+            final replyTo = data['replyTo'] as Map<String, dynamic>?;
             // 안 읽은 사람 수 = 참여자 수 - 읽은 사람 수
             final readBy = (data['readBy'] as List<dynamic>?) ?? const [];
             final unreadCount = _memberCount > 0
@@ -1084,28 +1167,11 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             return Column(
               children: [
                 if (dateDivider != null) _buildDateDivider(dateDivider),
-                GestureDetector(
-                  // 타인의 메시지를 길게 눌러도 신고/차단 메뉴가 열린다.
-                  onLongPress: isMine || senderId == null
-                      ? null
-                      : () => _showModerationSheet(
-                            messageId: docs[index].id,
-                            senderId: senderId,
-                            senderName: senderName,
-                            text: text,
-                          ),
-                  child: _buildBubble(
-                    isMine: isMine,
-                    senderName: senderName,
-                    roomNumber: roomNumber,
-                    text: text,
-                    time: isLastOfGroup ? time : '',
-                    isFirstOfGroup: isFirstOfGroup,
-                    mediaUrl: mediaUrl,
-                    mediaType: mediaType,
-                    unreadCount: unreadCount,
-                    // 타인 메시지에는 신고/차단 메뉴 버튼을 노출한다.
-                    onModerate: isMine || senderId == null
+                _SwipeToReply(
+                  onReply: () => _setReplyTarget(data),
+                  child: GestureDetector(
+                    // 타인의 메시지를 길게 눌러도 신고/차단 메뉴가 열린다.
+                    onLongPress: isMine || senderId == null
                         ? null
                         : () => _showModerationSheet(
                               messageId: docs[index].id,
@@ -1113,6 +1179,27 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                               senderName: senderName,
                               text: text,
                             ),
+                    child: _buildBubble(
+                      isMine: isMine,
+                      senderName: senderName,
+                      roomNumber: roomNumber,
+                      text: text,
+                      time: isLastOfGroup ? time : '',
+                      isFirstOfGroup: isFirstOfGroup,
+                      mediaUrl: mediaUrl,
+                      mediaType: mediaType,
+                      unreadCount: unreadCount,
+                      replyTo: replyTo,
+                      // 타인 메시지에는 신고/차단 메뉴 버튼을 노출한다.
+                      onModerate: isMine || senderId == null
+                          ? null
+                          : () => _showModerationSheet(
+                                messageId: docs[index].id,
+                                senderId: senderId,
+                                senderName: senderName,
+                                text: text,
+                              ),
+                    ),
                   ),
                 ),
               ],
@@ -1149,6 +1236,7 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     String? mediaUrl,
     String? mediaType,
     int unreadCount = 0,
+    Map<String, dynamic>? replyTo,
     VoidCallback? onModerate,
   }) {
     final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
@@ -1245,9 +1333,21 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                                 ),
                               ],
                             ),
-                            child: Text(text,
-                                style: TextStyle(
-                                    fontSize: 14, color: textColor, height: 1.4)),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (replyTo != null) ...[
+                                  _buildReplyQuote(replyTo, isMine),
+                                  const SizedBox(height: 6),
+                                ],
+                                Text(text,
+                                    style: TextStyle(
+                                        fontSize: 14,
+                                        color: textColor,
+                                        height: 1.4)),
+                              ],
+                            ),
                           ),
                   ),
                   if (!isMine) ...[
@@ -1290,6 +1390,45 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     );
   }
 
+  Widget _buildReplyQuote(Map<String, dynamic> replyTo, bool isMine) {
+    final name = replyTo['senderName'] as String? ?? '';
+    final mediaType = replyTo['mediaType'] as String?;
+    final rawText = replyTo['text'] as String? ?? '';
+    final preview = mediaType == 'video'
+        ? '[영상]'
+        : mediaType == 'image'
+            ? '[사진]'
+            : rawText;
+    final barColor = isMine ? Colors.white70 : Colors.cyan.shade400;
+    final bgColor =
+        isMine ? Colors.white.withValues(alpha: 0.15) : Colors.cyan.shade50;
+    final textColor = isMine ? Colors.white : Colors.grey.shade700;
+    final nameColor = isMine ? Colors.white : Colors.cyan.shade800;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: BorderRadius.circular(6),
+        border: Border(left: BorderSide(color: barColor, width: 3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(name,
+              style: TextStyle(
+                  fontSize: 11.5, fontWeight: FontWeight.bold, color: nameColor)),
+          const SizedBox(height: 2),
+          Text(preview,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: textColor)),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInputBar() {
     if (_isRestrictedTime()) {
       return SafeArea(
@@ -1321,6 +1460,65 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 답장 대상 미리보기
+          ValueListenableBuilder<Map<String, dynamic>?>(
+            valueListenable: _replyTargetNotifier,
+            builder: (_, replyTo, __) {
+              if (replyTo == null) return const SizedBox.shrink();
+              final name = replyTo['senderName'] as String? ?? '';
+              final mediaType = replyTo['mediaType'] as String?;
+              final rawText = replyTo['text'] as String? ?? '';
+              final preview = mediaType == 'video'
+                  ? '[영상]'
+                  : mediaType == 'image'
+                      ? '[사진]'
+                      : rawText;
+              return Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  border: Border(top: BorderSide(color: Colors.grey.shade200)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 3,
+                      height: 32,
+                      color: Colors.cyan.shade400,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('$name님에게 답장',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.cyan.shade800)),
+                          const SizedBox(height: 2),
+                          Text(preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 12, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: _clearReplyTarget,
+                      icon: Icon(Icons.close, size: 18, color: Colors.grey.shade500),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           // 압축/업로드 진행 표시
           ValueListenableBuilder<String?>(
             valueListenable: _uploadingNotifier,
@@ -1424,6 +1622,97 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             ),
           ],
         ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 메시지 버블을 좌측으로 스와이프하면 답장 대상으로 지정하는 래퍼.
+/// 드래그하는 동안 버블이 따라 움직이고, 손을 떼면 원위치로 스냅한다.
+class _SwipeToReply extends StatefulWidget {
+  final Widget child;
+  final VoidCallback? onReply;
+
+  const _SwipeToReply({required this.child, this.onReply});
+
+  @override
+  State<_SwipeToReply> createState() => _SwipeToReplyState();
+}
+
+class _SwipeToReplyState extends State<_SwipeToReply>
+    with SingleTickerProviderStateMixin {
+  static const double _triggerDistance = 56;
+  static const double _maxDrag = 72;
+
+  late final AnimationController _controller;
+  double _dragStartDx = 0;
+  double _dragDx = 0;
+  bool _triggered = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 180),
+    );
+    _controller.addListener(() {
+      setState(() {
+        _dragDx = _dragStartDx * (1 - _controller.value);
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onUpdate(DragUpdateDetails details) {
+    if (widget.onReply == null) return;
+    setState(() {
+      _dragDx = (_dragDx + details.delta.dx).clamp(-_maxDrag, 0.0);
+      final shouldTrigger = _dragDx <= -_triggerDistance;
+      if (shouldTrigger && !_triggered) {
+        _triggered = true;
+        HapticFeedback.selectionClick();
+      } else if (!shouldTrigger && _triggered) {
+        _triggered = false;
+      }
+    });
+  }
+
+  void _onEnd(DragEndDetails details) {
+    if (widget.onReply == null) return;
+    if (_triggered) widget.onReply!();
+    _triggered = false;
+    _dragStartDx = _dragDx;
+    _controller.forward(from: 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragUpdate: _onUpdate,
+      onHorizontalDragEnd: _onEnd,
+      child: Stack(
+        alignment: Alignment.centerRight,
+        children: [
+          if (_dragDx < 0)
+            Opacity(
+              opacity: (-_dragDx / _triggerDistance).clamp(0.0, 1.0),
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Icon(Icons.reply, size: 20, color: Colors.cyan.shade400),
+              ),
+            ),
+          Transform.translate(
+            offset: Offset(_dragDx, 0),
+            child: widget.child,
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/server_clock.dart';
 import 'package:intl/intl.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:http/http.dart' as http;
@@ -105,6 +106,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
   final Map<String, String?> _floorStatusSetBy = {};
   // 관리자 상태 (외박, Windows 관리프로그램 전용, 읽기 전용): userId → 상태
   final Map<String, String?> _adminStatuses = {};
+  // 학생별 비고 (자유 텍스트): userId → 비고
+  final Map<String, String?> _remarks = {};
 
   static const _statusOptions = ['외박미신청', '외박미수정', '바롬인성교육관', '무단퇴사'];
   static const _statusColors = {
@@ -137,6 +140,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
   @override
   void initState() {
     super.initState();
+    // QR 검증은 서버 시각 기준이므로 화면 진입 시 미리 동기화해 둔다 (실패해도 스캔 시 재시도).
+    ServerClock.sync();
     _loadAssignedFloorThenEvents();
     _loadUnregisteredStudents();
   }
@@ -206,7 +211,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
 
   /// 구역 문자열(예: '국제생활관 A동 2층')에서 기숙사 건물명을 뽑는다.
   static String? _dormBuildingOf(String floor) =>
-      floor.contains('겨울방학') ? '샬롬하우스(겨울방학)' : floor.split(' ').firstOrNull;
+      floor.contains('방학') ? '샬롬하우스(방학)' : floor.split(' ').firstOrNull;
 
   void _updateRoomUnregisteredStudents(
     String? roomNumber, {
@@ -309,8 +314,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           .collection('users')
           .where('role', isEqualTo: 'student');
       if (_assignedFloor != null) {
-        final dormBuilding = _assignedFloor!.contains('겨울방학')
-            ? '샬롬하우스(겨울방학)'
+        final dormBuilding = _assignedFloor!.contains('방학')
+            ? '샬롬하우스(방학)'
             : _assignedFloor!.split(' ').firstOrNull;
         if (dormBuilding != null) {
           usersQuery = usersQuery.where('dormBuilding', isEqualTo: dormBuilding);
@@ -365,6 +370,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       _floorStatuses.clear();
       _floorStatusSetBy.clear();
       _adminStatuses.clear();
+      _remarks.clear();
     });
 
     final event = _events.firstWhere(
@@ -412,6 +418,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           (eventDoc.data()?['floorStatusSetBy'] as Map<String, dynamic>?) ?? {};
       final savedAdminStatuses =
           (eventDoc.data()?['adminStatuses'] as Map<String, dynamic>?) ?? {};
+      final savedRemarks =
+          (eventDoc.data()?['remarks'] as Map<String, dynamic>?) ?? {};
 
       if (!mounted) return;
       setState(() {
@@ -433,6 +441,9 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         });
         savedAdminStatuses.forEach((uid, st) {
           _adminStatuses[uid] = st as String?;
+        });
+        savedRemarks.forEach((uid, remark) {
+          _remarks[uid] = remark as String?;
         });
         _isLoadingRecords = false;
       });
@@ -485,6 +496,49 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         'floorStatusSetByName.$userId': status != null ? (name ?? email) : FieldValue.delete(),
       });
     });
+  }
+
+  Future<void> _saveRemark(String userId, String? remark) async {
+    final eventId = _selectedEventId;
+    if (eventId == null) return;
+    final trimmed = remark?.trim();
+    setState(() => _remarks[userId] = (trimmed?.isEmpty ?? true) ? null : trimmed);
+    await _firestore.collection('attendance_events').doc(eventId).update({
+      'remarks.$userId':
+          (trimmed?.isEmpty ?? true) ? FieldValue.delete() : trimmed,
+    });
+  }
+
+  void _showRemarkDialog(String userId, String studentName) {
+    final controller = TextEditingController(text: _remarks[userId] ?? '');
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('$studentName 비고'),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: '비고를 입력하세요',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () {
+              _saveRemark(userId, controller.text);
+              Navigator.pop(dialogContext);
+            },
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
   }
 
   String _generateToken() {
@@ -861,7 +915,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                 Expanded(
                                   child: _buildFireDrillStageButton(
                                     eventId: eventId,
-                                    label: '대피 시작',
+                                    label: '1차',
                                     selected: !(_fireDrillArrivalMode[eventId] ?? false),
                                     onTap: () => setState(() => _fireDrillArrivalMode[eventId] = false),
                                   ),
@@ -870,7 +924,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                 Expanded(
                                   child: _buildFireDrillStageButton(
                                     eventId: eventId,
-                                    label: '대피 도착',
+                                    label: '2차',
                                     selected: _fireDrillArrivalMode[eventId] ?? false,
                                     onTap: () => setState(() => _fireDrillArrivalMode[eventId] = true),
                                   ),
@@ -1119,8 +1173,11 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                 );
                 final checkedAt =
                     (record['checkedInAt'] as Timestamp?)?.toDate();
-                // 화재대피용: 대피 시작만 확인되고 아직 도착 확인이 안 된 상태
-                final hasStartedOnly = record.isNotEmpty && record['isComplete'] == false;
+                final arrivalCheckedAt =
+                    (record['arrivalCheckedAt'] as Timestamp?)?.toDate();
+                // 화재대피용: 1차와 2차 중 하나만 확인된 상태(둘 다 있어야 출석 완료).
+                final hasStartedOnly =
+                    record.isNotEmpty && record['isComplete'] == false;
 
                 final adminStatus = _adminStatuses[uid];
                 final floorStatus = _floorStatuses[uid];
@@ -1128,6 +1185,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                 final hasAdminStatus = adminStatus != null && adminStatus.isNotEmpty;
                 final adminStatusColor = _statusColors[adminStatus] ?? Colors.grey;
                 final floorStatusColor = _statusColors[floorStatus] ?? Colors.grey;
+                final remark = _remarks[uid];
 
                 return Container(
                   color: isBlocked ? blockedColor.withValues(alpha: 0.05) : null,
@@ -1214,23 +1272,48 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                             ] else ...[
                               if (hasStartedOnly) ...[
                                 const SizedBox(height: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: Colors.orange.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(
-                                        color: Colors.orange.withValues(alpha: 0.5)),
-                                  ),
-                                  child: Text(
-                                    '대피 시작 확인',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.orange.shade800,
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                            color: Colors.orange.withValues(alpha: 0.5)),
+                                      ),
+                                      child: Text(
+                                        checkedAt != null ? '1차 확인' : '2차 확인',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.orange.shade800,
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      checkedAt != null
+                                          ? DateFormat('HH:mm').format(checkedAt.toSeoul())
+                                          : '1차 미확인',
+                                      style: TextStyle(
+                                          color: Colors.orange.shade800,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                    if (checkedAt == null && arrivalCheckedAt != null) ...[
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '2차 ${DateFormat('HH:mm').format(arrivalCheckedAt.toSeoul())}',
+                                        style: TextStyle(
+                                            color: Colors.orange.shade800,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                               ],
                               if (hasAdminStatus) ...[
@@ -1245,7 +1328,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                         color: adminStatusColor.withValues(alpha: 0.5)),
                                   ),
                                   child: Text(
-                                    '외박신청완료',
+                                    '불참인정완료',
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
@@ -1327,19 +1410,104 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                 ],
                               ],
                             ],
+                            const SizedBox(height: 4),
+                            GestureDetector(
+                              onTap: isEventClosed
+                                  ? null
+                                  : () => _showRemarkDialog(uid, name),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.edit_note,
+                                    size: 14,
+                                    color: Colors.grey.shade500,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Flexible(
+                                    child: Text(
+                                      remark != null && remark.isNotEmpty
+                                          ? remark
+                                          : '비고 추가',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: remark != null && remark.isNotEmpty
+                                            ? Colors.grey.shade700
+                                            : Colors.grey.shade400,
+                                        fontStyle: remark != null && remark.isNotEmpty
+                                            ? FontStyle.normal
+                                            : FontStyle.italic,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                      if (!isBlocked && isPresent && checkedAt != null)
+                      if (!isBlocked && isPresent)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
-                          child: Text(
-                            DateFormat('HH:mm').format(checkedAt),
-                            style: TextStyle(
-                                color: Colors.green.shade700,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold),
-                          ),
+                          child: isFireDrillEvent
+                              ? Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                            color: Colors.green.withValues(alpha: 0.5)),
+                                      ),
+                                      child: Text(
+                                        '2차',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.green.shade700,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      checkedAt != null
+                                          ? '1차 ${DateFormat('HH:mm').format(checkedAt.toSeoul())}'
+                                          : '1차 미확인',
+                                      style: TextStyle(
+                                        color: checkedAt != null
+                                            ? Colors.grey.shade600
+                                            : Colors.orange.shade800,
+                                        fontSize: 11,
+                                        fontWeight: checkedAt != null
+                                            ? FontWeight.normal
+                                            : FontWeight.bold,
+                                      ),
+                                    ),
+                                    if (arrivalCheckedAt != null) ...[
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '2차 ${DateFormat('HH:mm').format(arrivalCheckedAt.toSeoul())}',
+                                        style: TextStyle(
+                                            color: Colors.green.shade700,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ],
+                                )
+                              : (checkedAt != null
+                                  ? Text(
+                                      DateFormat('HH:mm').format(checkedAt.toSeoul()),
+                                      style: TextStyle(
+                                          color: Colors.green.shade700,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.bold),
+                                    )
+                                  : const SizedBox.shrink()),
                         ),
                     ],
                   ),
@@ -1407,7 +1575,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       ),
       trailing: checkedAt != null
           ? Text(
-              DateFormat('HH:mm:ss').format(checkedAt),
+              DateFormat('HH:mm:ss').format(checkedAt.toSeoul()),
               style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
             )
           : null,
@@ -1440,6 +1608,42 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     );
   }
 
+  /// QR 체크가 기록되면 그 학생 호실의 층장 단톡방에 알림 메시지를 남긴다.
+  /// 출석 처리와는 별개이므로 실패해도 스캔 결과에는 영향을 주지 않는다.
+  Future<void> _postCheckInToRoomChat({
+    required Map<String, dynamic> student,
+    required String studentName,
+    required String eventTitle,
+    required String stageLabel,
+  }) async {
+    final captainUid = FirebaseAuth.instance.currentUser?.uid;
+    final dorm = student['dormBuilding'] as String? ?? '';
+    final wing = student['building'] as String? ?? '';
+    final room = student['roomNumber'] as String? ?? '';
+    if (captainUid == null || dorm.isEmpty || room.isEmpty || room == '000') return;
+    // message_screen.dart의 _toRoomId와 같은 규칙 (바롬인성교육관은 동 구분이 없다).
+    final roomId = wing.isEmpty ? '${dorm}_$room호' : '${dorm}_${wing}_$room호';
+    final text = '[인원점검] $studentName($room호) $stageLabel · $eventTitle';
+    try {
+      final chat = _firestore.collection('floor_chats').doc(roomId);
+      await chat.collection('messages').add({
+        'text': text,
+        'senderId': captainUid,
+        'senderName': '층장(${_assignedFloor ?? ''})',
+        'roomNumber': '층장',
+        'createdAt': FieldValue.serverTimestamp(),
+        'readBy': [captainUid],
+      });
+      await chat.set({
+        'lastMessage': text,
+        'lastAt': FieldValue.serverTimestamp(),
+        'roomId': roomId,
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('인원점검 단톡방 알림 실패: $e');
+    }
+  }
+
   /// 학생 QR("student:{studentId}")을 스캔한 결과를 검증하고 출석 기록을 남긴다.
   /// 반환값은 스캐너 화면에 보여줄 결과 메시지(성공 시 학생 이름, 실패 시 오류 메시지)이다.
   ///
@@ -1466,8 +1670,13 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     if (studentId.isEmpty || issuedAtMs == null) {
       return const _ScanResult(success: false, message: '유효하지 않은 QR 코드입니다');
     }
-    final elapsedSeconds = (DateTime.now().millisecondsSinceEpoch - issuedAtMs) / 1000;
-    if (elapsedSeconds > 5 || elapsedSeconds < -1) {
+    // 학생앱도 서버 시각으로 발급하므로 여기서도 서버 시각으로 비교한다.
+    // 화면 진입 시 동기화가 실패했으면(네트워크 지연 등) 여기서 한 번 더 시도한다.
+    if (!ServerClock.isSynced) await ServerClock.sync();
+    // 학생앱은 5초마다 QR을 갱신하지만, 카메라가 느린 폰의 스캔 지연과 양쪽 동기화의
+    // 네트워크 왕복 오차를 흡수하도록 층장앱은 발급 후 8초, 앞선 시각은 3초까지 허용한다.
+    final elapsedSeconds = (ServerClock.nowMs() - issuedAtMs) / 1000;
+    if (elapsedSeconds > 8 || elapsedSeconds < -3) {
       return const _ScanResult(success: false, message: '만료된 QR 코드입니다. 학생에게 QR을 다시 열어달라고 요청하세요');
     }
 
@@ -1506,12 +1715,53 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         return _ScanResult(success: false, message: '현재 상태($residentStatus)로는 인원점검이 불가능합니다');
       }
 
+      // 관리자가 이 이벤트에서 이미 외박(화재대피훈련은 불참인정)으로 열외 처리한 학생은
+      // QR 체크가 그 처리와 모순되므로 스캔 자체를 막는다.
+      final adminStatuses = (eventData['adminStatuses'] as Map<String, dynamic>?) ?? {};
+      final exemptStatus = isFireDrill ? '불참인정' : '외박';
+      if (adminStatuses[uid] == exemptStatus) {
+        final name = student['name'] as String? ?? '';
+        return _ScanResult(
+          success: false,
+          message: '$name님은 이미 $exemptStatus 처리되어 인원점검을 할 수 없습니다',
+        );
+      }
+
       if (eventRoomNumber != null && eventRoomNumber.isNotEmpty) {
         final studentRoom = student['roomNumber'] as String? ?? '';
         if (studentRoom != eventRoomNumber) {
           return _ScanResult(
             success: false,
             message: '$eventRoomNumber호 인원점검 이벤트입니다. 학생 호실($studentRoom호)과 일치하지 않습니다',
+          );
+        }
+      }
+
+      // 구역 전체 이벤트는 층마다 별도로 만들어지므로, 다른 층 층장이 스캔하면 그 층의
+      // 이벤트에 기록이 갈라져 화재대피 1차/2차가 한 기록으로 합쳐지지 않는다.
+      // 학생이 이 이벤트의 구역(건물·동·층) 소속일 때만 허용한다.
+      final eventFloor = eventData['floor'] as String?;
+      if (eventData['isFloorWide'] == true && eventFloor != null && eventFloor.isNotEmpty) {
+        final studentRoom = student['roomNumber'] as String? ?? '';
+        final studentDorm = student['dormBuilding'] as String? ?? '';
+        final eventDorm = _dormBuildingOf(eventFloor);
+        // 호실 범위 계산은 '(방학)' 표기가 없는 건물명 기준이다.
+        final floorRooms = _AttendanceHistoryContentState._roomsForFloor(
+            eventFloor.replaceFirst('(방학)', ''));
+        // 학생 프로필의 건물명은 방학 기간에 '샬롬하우스(방학)'처럼 남아 있을 수 있으므로
+        // '(방학)' 표기는 무시하고 건물만 비교한다.
+        String normDorm(String s) => s.replaceAll('(방학)', '').trim();
+        final dormMismatch = eventDorm != null &&
+            studentDorm.isNotEmpty &&
+            normDorm(studentDorm) != normDorm(eventDorm);
+        // 호실 범위를 알 수 없는 구역(바롬인성교육관 등)은 건물 일치만 확인한다.
+        final roomMismatch = floorRooms.isNotEmpty && !floorRooms.contains(studentRoom);
+        if (dormMismatch || roomMismatch) {
+          return _ScanResult(
+            success: false,
+            message: '$eventFloor 인원점검 이벤트입니다. '
+                '학생 구역($studentDorm $studentRoom호)과 일치하지 않습니다. '
+                '담당 층장에게 QR을 보여주도록 안내하세요',
           );
         }
       }
@@ -1547,6 +1797,12 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
         await batch.commit();
 
+        _postCheckInToRoomChat(
+          student: student,
+          studentName: studentName,
+          eventTitle: (eventData['title'] as String?) ?? '인원점검',
+          stageLabel: '인원점검 완료',
+        );
         _loadEvents(showLoading: false);
         if (_selectedEventId == eventId) {
           _loadRecords(eventId);
@@ -1562,7 +1818,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
             success: false,
             message: existingIsComplete
                 ? '$studentName님은 이미 인원점검을 완료했습니다'
-                : '$studentName님은 이미 대피 시작을 확인했습니다',
+                : '$studentName님은 이미 1차를 확인했습니다',
           );
         }
         final recordRef = _firestore.collection('attendance_records').doc();
@@ -1579,17 +1835,25 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           'isFireDrill': true,
         });
 
+        _postCheckInToRoomChat(
+          student: student,
+          studentName: studentName,
+          eventTitle: (eventData['title'] as String?) ?? '인원점검',
+          stageLabel: '1차(대피 시작) 확인',
+        );
         _loadEvents(showLoading: false);
         if (_selectedEventId == eventId) {
           _loadRecords(eventId);
         }
-        return _ScanResult(success: true, message: '$studentName님 대피 시작 확인');
+        return _ScanResult(success: true, message: '$studentName님 1차 확인');
       } else {
-        // 2차: 대피 도착 확인 (대피 시작을 스캔하지 않았어도 도착만으로 출석 인정)
+        // 2차: 대피 도착 확인. 1차(checkedInAt)까지 있어야 출석 완료로 인정한다.
         if (existingDoc != null) {
           if (existingIsComplete) {
             return _ScanResult(success: false, message: '$studentName님은 이미 인원점검을 완료했습니다');
           }
+          // 이 시점의 existingDoc은 1차만 확인된 기록(checkedInAt 있음, isComplete=false)이므로
+          // 2차까지 확인되면 정상적으로 출석 완료로 처리한다.
           final batch = _firestore.batch();
           batch.update(existingDoc.reference, {
             'arrivalCheckedAt': Timestamp.now(),
@@ -1598,10 +1862,21 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           final eventRef = _firestore.collection('attendance_events').doc(eventId);
           batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
           await batch.commit();
+
+          _postCheckInToRoomChat(
+            student: student,
+            studentName: studentName,
+            eventTitle: (eventData['title'] as String?) ?? '인원점검',
+            stageLabel: '2차(대피 도착) 확인 · 인원점검 완료',
+          );
+          _loadEvents(showLoading: false);
+          if (_selectedEventId == eventId) {
+            _loadRecords(eventId);
+          }
+          return _ScanResult(success: true, message: '$studentName님 인원점검 완료');
         } else {
-          final batch = _firestore.batch();
-          final recordRef = _firestore.collection('attendance_records').doc();
-          batch.set(recordRef, {
+          // 1차 확인 없이 2차만 스캔한 경우: checkedInAt이 없으므로 출석 미완료로 남긴다.
+          await _firestore.collection('attendance_records').add({
             'eventId': eventId,
             'eventTitle': eventData['title'] ?? '',
             'userId': uid,
@@ -1610,19 +1885,25 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
             'roomNumber': student['roomNumber'] ?? '',
             'dormBuilding': student['dormBuilding'] ?? '',
             'arrivalCheckedAt': Timestamp.now(),
-            'isComplete': true,
+            'isComplete': false,
             'isFireDrill': true,
           });
-          final eventRef = _firestore.collection('attendance_events').doc(eventId);
-          batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
-          await batch.commit();
-        }
 
-        _loadEvents(showLoading: false);
-        if (_selectedEventId == eventId) {
-          _loadRecords(eventId);
+          _postCheckInToRoomChat(
+            student: student,
+            studentName: studentName,
+            eventTitle: (eventData['title'] as String?) ?? '인원점검',
+            stageLabel: '2차(대피 도착) 확인 (1차 미확인)',
+          );
+          _loadEvents(showLoading: false);
+          if (_selectedEventId == eventId) {
+            _loadRecords(eventId);
+          }
+          return _ScanResult(
+            success: true,
+            message: '$studentName님 2차 확인 (1차 미확인으로 인원점검 미완료)',
+          );
         }
-        return _ScanResult(success: true, message: '$studentName님 인원점검 완료');
       }
     } catch (e) {
       return _ScanResult(success: false, message: '오류: $e');
@@ -1656,9 +1937,15 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       }
     }
     students.sort((a, b) {
-      final roomA = int.tryParse((a['roomNumber'] as String?) ?? '') ?? 0;
-      final roomB = int.tryParse((b['roomNumber'] as String?) ?? '') ?? 0;
-      if (roomA != roomB) return roomA.compareTo(roomB);
+      // 바롬 '1001-A' 형식도 자연스럽게 정렬되도록 문자열 비교를 우선한다.
+      final rawA = (a['roomNumber'] as String?) ?? '';
+      final rawB = (b['roomNumber'] as String?) ?? '';
+      final roomA = int.tryParse(rawA.split('-').first);
+      final roomB = int.tryParse(rawB.split('-').first);
+      if (roomA != null && roomB != null && roomA != roomB) {
+        return roomA.compareTo(roomB);
+      }
+      if (rawA != rawB) return rawA.compareTo(rawB);
       return (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? '');
     });
     return (students: students, occupiedRooms: occupiedRooms, allRoomNumbers: allRoomNumbers);
@@ -1716,7 +2003,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       final residentStatus = (data['residentStatus'] as String?) ?? '재실중';
       if (residentStatus != '재실중') continue;
       if (dormBuilding == '바롬인성교육관') {
-        final n = int.tryParse(r);
+        // 바롬 호실은 '1001-A' 형식 → '-' 앞 숫자로 층 판정
+        final n = int.tryParse(r.split('-').first);
         if (n != null && n ~/ 100 == floorNum) occupiedRooms.add(r);
       } else {
         occupiedRooms.add(r);
@@ -1726,7 +2014,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     if (dormBuilding == '바롬인성교육관') {
       // 물리적 전체 호실 범위가 없으므로 재실 이력이 있는 호실만 후보로 사용
       candidateRooms = occupiedRooms.toList()
-        ..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+        ..sort((a, b) => a.compareTo(b));
     }
 
     return {for (final r in candidateRooms) r: occupiedRooms.contains(r)};
@@ -1955,7 +2243,7 @@ class _QrScannerPageState extends State<_QrScannerPage> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  widget.isArrivalStage ? '대피 도착 확인 모드' : '대피 시작 확인 모드',
+                  widget.isArrivalStage ? '2차 확인 모드' : '1차 확인 모드',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Colors.white,
@@ -2250,7 +2538,8 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
         if (_assignedFloor == null) return true;
         if (floorRooms.isNotEmpty) return floorRooms.contains(room);
         if (baromFloorNum != null) {
-          final n = int.tryParse(room);
+          // 바롬 호실은 '1001-A' 형식 → '-' 앞 숫자로 층 판정
+          final n = int.tryParse(room.split('-').first);
           return n != null && n ~/ 100 == baromFloorNum;
         }
         return true;
@@ -2341,9 +2630,9 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
 
   static String? _dormFromFloor(String? floor) {
     if (floor == null) return null;
-    if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
+    if (floor.startsWith('샬롬하우스(방학)')) return '샬롬하우스(방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
-    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
+    if (floor.startsWith('국제생활관(방학)')) return '국제생활관(방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;
@@ -2386,7 +2675,7 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
   }
 
   static Color _buildingColor(String? dorm) {
-    if (dorm == '샬롬하우스' || dorm == '샬롬하우스(겨울방학)') return Colors.blue;
+    if (dorm == '샬롬하우스' || dorm == '샬롬하우스(방학)') return Colors.blue;
     if (dorm == '국제생활관') return Colors.green;
     if (dorm == '바롬인성교육관') return const Color(0xFFFF9800);
     return Colors.grey;
@@ -2631,6 +2920,8 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
 
   static const _statusColors = {
     '재실확인': Colors.green,
+    '불참인정': Color(0xFFFF9800),
+    '불참인정완료': Color(0xFFFF9800),
     '외박': Color(0xFFFF9800),
     '외박신청완료': Color(0xFFFF9800),
     '화재대피참석': Colors.green,
@@ -2643,8 +2934,10 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
   };
   static const _statusIcons = {
     '재실확인': Icons.check_circle,
-    '외박': Icons.flight,
-    '외박신청완료': Icons.flight,
+    '불참인정': Icons.event_available,
+    '불참인정완료': Icons.event_available,
+    '외박': Icons.event_available,
+    '외박신청완료': Icons.event_available,
     '화재대피참석': Icons.check_circle,
     '화재대피훈련불참': Icons.cancel,
     '부재': Icons.person_off,
@@ -2667,9 +2960,9 @@ class _AttendanceHistoryContentState extends State<_AttendanceHistoryContent> {
     final isComplete = data['isComplete'] != false;
 
     final String primaryStatus;
-    if (isStatusRecord && adminStatus == '외박') {
-      // 외박신청완료가 최우선 — 화재대피 참석 여부보다 먼저 표시한다.
-      primaryStatus = '외박신청완료';
+    if (isStatusRecord && adminStatus == '불참인정') {
+      // 불참인정이 최우선 — 화재대피 참석 여부보다 먼저 표시한다.
+      primaryStatus = '불참인정완료';
     } else if (isStatusRecord) {
       primaryStatus = floorStatus ?? adminStatus ?? '기타';
     } else if (isFireDrillEvent) {

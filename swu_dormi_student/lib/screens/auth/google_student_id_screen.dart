@@ -63,6 +63,18 @@ class _GoogleStudentIdScreenState extends State<GoogleStudentIdScreen> {
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
     try {
+      // 관리프로그램이 올린 사생 명단에 없는 학번이면 중복 여부와 관계없이 통과시키지 않는다.
+      final inRoster = await authProvider.isStudentIdInRoster(studentId);
+      if (!mounted) return;
+      if (!inRoster) {
+        setState(() {
+          _isCheckingStudentId = false;
+          _verifiedStudentId = null;
+        });
+        await _showStudentIdNotInRosterDialog(s);
+        return;
+      }
+
       final isAvailable = await authProvider.isStudentIdAvailable(studentId);
 
       if (!mounted) return;
@@ -85,6 +97,22 @@ class _GoogleStudentIdScreenState extends State<GoogleStudentIdScreen> {
         SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
     }
+  }
+
+  Future<void> _showStudentIdNotInRosterDialog(LoginStrings s) {
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.studentIdNotInRosterTitle),
+        content: Text(s.studentIdNotInRosterBody),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.studentIdNotInRosterOk),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _submit() async {

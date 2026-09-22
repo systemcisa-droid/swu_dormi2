@@ -421,3 +421,4 @@ exports.checkEmailSignInMethods = onCall(async (request) => {
     throw new HttpsError("internal", "가입 정보를 확인하지 못했습니다.");
   }
 });
+

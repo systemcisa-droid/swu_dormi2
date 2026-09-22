@@ -135,12 +135,12 @@ class _StudentsManagementScreenState extends State<StudentsManagementScreen> {
     if (zone == null) return null;
 
     String dorm;
-    if (zone.startsWith('샬롬하우스(겨울방학)')) {
-      dorm = '샬롬하우스(겨울방학)';
+    if (zone.startsWith('샬롬하우스(방학)')) {
+      dorm = '샬롬하우스(방학)';
     } else if (zone.startsWith('샬롬하우스')) {
       dorm = '샬롬하우스';
-    } else if (zone.startsWith('국제생활관(겨울방학)')) {
-      dorm = '국제생활관(겨울방학)';
+    } else if (zone.startsWith('국제생활관(방학)')) {
+      dorm = '국제생활관(방학)';
     } else if (zone.startsWith('국제생활관')) {
       dorm = '국제생활관';
     } else if (zone.startsWith('바롬인성교육관')) {

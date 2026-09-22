@@ -5,6 +5,17 @@ import 'package:intl/intl.dart';
 
 const _kWorkTypes = ['행정실 업무', '입사 업무', '관내 점검', '인원 점검', '화재 대피훈련'];
 
+/// 근무시간을 표시용 문자열로 변환한다.
+/// 22:00~24:00 심야 1.5배 가산으로 0.75시간처럼 소수점 둘째 자리가 필요한 값이 생기므로,
+/// 정수·1자리는 그대로, 그 외에는 둘째 자리까지 보여준다 (예: 3 → "3", 0.5 → "0.5", 0.75 → "0.75").
+String _formatHours(double hours) {
+  final rounded2 = (hours * 100).round() / 100;
+  if (rounded2 == rounded2.roundToDouble()) return rounded2.toStringAsFixed(0);
+  final rounded1 = (hours * 10).round() / 10;
+  if (rounded1 == rounded2) return rounded1.toStringAsFixed(1);
+  return rounded2.toStringAsFixed(2);
+}
+
 class InternLogScreen extends StatefulWidget {
   const InternLogScreen({super.key});
 
@@ -58,25 +69,65 @@ class _InternLogScreenState extends State<InternLogScreen> {
         data['_id'] = d.id;
         return data;
       }).toList();
-      docs.sort((a, b) {
-        final aT = (a['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
-        final bT = (b['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
-        return bT.compareTo(aT);
-      });
+      // 최신순(내림차순) 표시. 누적 계산과 같은 기준을 쓰도록 _logCompare 를 뒤집는다.
+      docs.sort((a, b) => -_logCompare(a, b));
       if (mounted) setState(() { _logs = docs; _isLoading = false; });
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // 전체 누적시간 = 모든 로그의 workHours 합산
+  /// 근무일지 정렬 기준: 날짜 → 시작시간 → 문서 id (오름차순, 오래된 것이 먼저).
+  /// 표시(_loadLogs)는 이걸 뒤집어 최신순으로, 누적 계산(_runningTotals)은 그대로 쓴다.
+  /// 두 곳이 같은 기준을 써야 리스트 순서와 누적값이 어긋나지 않는다.
+  static int _logCompare(Map<String, dynamic> a, Map<String, dynamic> b) {
+    final aT = (a['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
+    final bT = (b['workDate'] as Timestamp?)?.toDate() ?? DateTime(0);
+    // 날짜만 비교 (workDate 에 시각이 섞여 있어도 같은 날은 동일 취급)
+    final aDay = DateTime(aT.year, aT.month, aT.day);
+    final bDay = DateTime(bT.year, bT.month, bT.day);
+    final byDay = aDay.compareTo(bDay);
+    if (byDay != 0) return byDay;
+    final aStart = (a['startTime'] as String?) ?? '';
+    final bStart = (b['startTime'] as String?) ?? '';
+    final byStart = aStart.compareTo(bStart);
+    if (byStart != 0) return byStart;
+    return (a['_id'] as String? ?? '').compareTo(b['_id'] as String? ?? '');
+  }
+
+  /// 로그 하나의 인정 근무시간을 반환한다. 시작~종료 시각이 있으면 심야 가산을
+  /// 포함해 실시간으로 다시 계산하고(옛 데이터에 저장된 workHours가 가산 반영 전
+  /// 값일 수 있으므로), 없으면 저장된 workHours 를 그대로 쓴다.
+  double _effectiveHours(Map<String, dynamic> log) {
+    final start = _parseMinutes(log['startTime'] as String?, -1);
+    final end = _parseMinutes(log['endTime'] as String?, -1);
+    if (start >= 0 && end >= 0) return _calcHours(start, end);
+    return (log['workHours'] as num?)?.toDouble() ?? 0;
+  }
+
+  // 전체 누적시간 = 모든 로그의 인정 근무시간 합산
   double _computeAccumulated({String? excludeId}) {
     double total = 0;
     for (final log in _logs) {
       if (excludeId != null && log['_id'] == excludeId) continue;
-      total += (log['workHours'] as num?)?.toDouble() ?? 0;
+      total += _effectiveHours(log);
     }
     return total;
+  }
+
+  /// 각 로그의 '그 날짜까지의 누적시간'을 실시간 계산한다.
+  /// 저장된 accumulatedHours/workHours 필드는 심야 가산 반영 전의 옛 스냅샷일 수 있으므로
+  /// 쓰지 않고, 시작~종료 시각으로 매번 다시 계산해 합산한다.
+  /// 반환: 문서 id → (오래된 순으로 자기 자신 포함 러닝 합계)
+  Map<String, double> _runningTotals() {
+    final sorted = [..._logs]..sort(_logCompare);
+    final result = <String, double>{};
+    double running = 0;
+    for (final log in sorted) {
+      running += _effectiveHours(log);
+      result[log['_id'] as String] = running;
+    }
+    return result;
   }
 
   /// 자정 기준 분 단위를 'HH:mm' 로 변환한다.
@@ -98,9 +149,29 @@ class _InternLogScreenState extends State<InternLogScreen> {
     return h * 60 + m;
   }
 
+  /// 22:00~24:00(심야) 구간 근무는 1.5배로 가산 인정한다.
+  /// 예: 22:00~24:00 근무(2시간) → 인정 3.0시간. 21:00~23:00처럼 걸치는 경우도
+  /// 심야 구간(22:00~23:00)만 1.5배를 적용해 정확히 계산한다.
+  static const _nightStartMinutes = 22 * 60; // 22:00
+  static const _nightEndMinutes = 24 * 60; // 24:00(자정)
+  static const _nightMultiplier = 1.5;
+
   double _calcHours(int startMinutes, int endMinutes) {
-    final mins = endMinutes - startMinutes;
-    return mins > 0 ? mins / 60.0 : 0;
+    final b = _calcHoursBreakdown(startMinutes, endMinutes);
+    return b.base + b.bonus;
+  }
+
+  /// 근무시간을 '기본(정상 시급 환산 시간)'과 '가산분(심야 1.5배로 추가된 시간)'으로 나눠 반환한다.
+  /// 예: 23:30~24:00(30분, 전부 심야) → base 0.5, bonus 0.25 (0.5시간의 절반이 가산).
+  ({double base, double bonus}) _calcHoursBreakdown(int startMinutes, int endMinutes) {
+    if (endMinutes <= startMinutes) return (base: 0, bonus: 0);
+    final overlapStart = startMinutes < _nightStartMinutes ? _nightStartMinutes : startMinutes;
+    final overlapEnd = endMinutes > _nightEndMinutes ? _nightEndMinutes : endMinutes;
+    final nightMinutes = overlapEnd > overlapStart ? overlapEnd - overlapStart : 0;
+    final normalMinutes = (endMinutes - startMinutes) - nightMinutes;
+    final base = normalMinutes / 60.0 + nightMinutes / 60.0;
+    final bonus = (nightMinutes / 60.0) * (_nightMultiplier - 1);
+    return (base: base, bonus: bonus);
   }
 
   Future<void> _showAddDialog({Map<String, dynamic>? existing}) async {
@@ -131,6 +202,8 @@ class _InternLogScreenState extends State<InternLogScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           final workHours = _calcHours(startTime, endTime);
+          final rawHours = (endTime - startTime) > 0 ? (endTime - startTime) / 60.0 : 0.0;
+          final hasNightBonus = workHours > rawHours;
           final accumulated = _computeAccumulated(excludeId: editId) + workHours;
 
           Future<void> pickTime(bool isStart) async {
@@ -220,15 +293,30 @@ class _InternLogScreenState extends State<InternLogScreen> {
                       color: Colors.blue.withValues(alpha: 0.06),
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.timer_outlined, size: 14, color: Colors.blue),
-                        const SizedBox(width: 6),
-                        Text(
-                          '근무시간: ${workHours.toStringAsFixed(1)}시간 '
-                          '(${(workHours * 60).toInt()}분)',
-                          style: const TextStyle(fontSize: 12, color: Colors.blue),
+                        Row(
+                          children: [
+                            const Icon(Icons.timer_outlined, size: 14, color: Colors.blue),
+                            const SizedBox(width: 6),
+                            Text(
+                              hasNightBonus
+                                  ? '인정 근무시간: ${_formatHours(workHours)}시간'
+                                  : '근무시간: ${_formatHours(workHours)}시간 '
+                                      '(${(workHours * 60).toInt()}분)',
+                              style: const TextStyle(fontSize: 12, color: Colors.blue),
+                            ),
+                          ],
                         ),
+                        if (hasNightBonus) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            '실제 근무 ${_formatHours(rawHours)}시간 '
+                            '(22:00~24:00 구간 1.5배 가산 적용)',
+                            style: TextStyle(fontSize: 11, color: Colors.blue.shade300),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -273,8 +361,8 @@ class _InternLogScreenState extends State<InternLogScreen> {
                   ],
                   const SizedBox(height: 16),
 
-                  // 누적시간 (자동 계산, 읽기 전용)
-                  const Text('누적시간', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  // 전체 누적시간 (이 일지 저장 후 총 근무시간, 읽기 전용)
+                  const Text('전체 누적시간', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
                   const SizedBox(height: 6),
                   Container(
                     width: double.infinity,
@@ -289,7 +377,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                         const Icon(Icons.access_time_filled, size: 16, color: Color(0xFFA6BF96)),
                         const SizedBox(width: 8),
                         Text(
-                          '${accumulated.toStringAsFixed(1)}시간',
+                          '${_formatHours(accumulated)}시간',
                           style: const TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
@@ -298,7 +386,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          '(이전 ${_computeAccumulated(excludeId: editId).toStringAsFixed(1)} + 이번 ${workHours.toStringAsFixed(1)})',
+                          '(기존 ${_formatHours(_computeAccumulated(excludeId: editId))} + 이번 ${_formatHours(workHours)})',
                           style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                         ),
                       ],
@@ -339,7 +427,6 @@ class _InternLogScreenState extends State<InternLogScreen> {
                     endTime: endTime,
                     workHours: workHours,
                     workTypes: allTypes,
-                    accumulatedHours: accumulated,
                   );
                 },
                 child: Text(isEdit ? '수정' : '저장'),
@@ -358,11 +445,11 @@ class _InternLogScreenState extends State<InternLogScreen> {
     required int endTime,
     required double workHours,
     required List<String> workTypes,
-    required double accumulatedHours,
   }) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
     try {
+      // accumulatedHours 는 저장하지 않는다 — 누적시간은 화면에서 날짜순으로 실시간 계산한다.
       final payload = <String, dynamic>{
         'uid': uid,
         'workDate': Timestamp.fromDate(workDate),
@@ -370,7 +457,6 @@ class _InternLogScreenState extends State<InternLogScreen> {
         'endTime': _formatMinutes(endTime),
         'workHours': workHours,
         'workTypes': workTypes,
-        'accumulatedHours': accumulatedHours,
         'updatedAt': Timestamp.now(),
       };
       if (id != null) {
@@ -451,7 +537,7 @@ class _InternLogScreenState extends State<InternLogScreen> {
                       ),
                       const Spacer(),
                       Text(
-                        '누적 ${totalHours.toStringAsFixed(1)}시간',
+                        '누적 ${_formatHours(totalHours)}시간',
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -473,15 +559,22 @@ class _InternLogScreenState extends State<InternLogScreen> {
                             ],
                           ),
                         )
-                      : RefreshIndicator(
-                          onRefresh: _loadLogs,
-                          child: ListView.separated(
-                            padding: const EdgeInsets.all(12),
-                            itemCount: _logs.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 8),
-                            itemBuilder: (_, i) => _buildLogCard(_logs[i]),
-                          ),
-                        ),
+                      : Builder(builder: (context) {
+                          final running = _runningTotals();
+                          return RefreshIndicator(
+                            onRefresh: _loadLogs,
+                            child: ListView.separated(
+                              padding: const EdgeInsets.all(12),
+                              itemCount: _logs.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 8),
+                              itemBuilder: (_, i) => _buildLogCard(
+                                _logs[i],
+                                running[_logs[i]['_id']] ?? 0,
+                              ),
+                            ),
+                          );
+                        }),
                 ),
               ],
             ),
@@ -495,16 +588,31 @@ class _InternLogScreenState extends State<InternLogScreen> {
     );
   }
 
-  Widget _buildLogCard(Map<String, dynamic> log) {
+  Widget _buildLogCard(Map<String, dynamic> log, double accHours) {
     final id = log['_id'] as String;
     final workDate = (log['workDate'] as Timestamp?)?.toDate();
     final startTime = log['startTime'] as String?;
     final endTime = log['endTime'] as String?;
     final workHours = (log['workHours'] as num?)?.toDouble();
-    final accHours = (log['accumulatedHours'] as num?)?.toDouble();
     final workTypes = log['workTypes'] is List
         ? (log['workTypes'] as List).map((e) => e as String).toList()
         : <String>[];
+
+    // 저장된 workHours 는 이미 심야 가산이 반영된 합계이므로, 시작~종료 시각으로
+    // 기본/가산 분을 다시 나눠 뱃지에 "0.5 + 0.25(가산)" 형태로 보여준다.
+    double? bonusHours;
+    double? baseHours;
+    if (startTime != null && endTime != null) {
+      final s = _parseMinutes(startTime, -1);
+      final e = _parseMinutes(endTime, -1);
+      if (s >= 0 && e >= 0) {
+        final breakdown = _calcHoursBreakdown(s, e);
+        if (breakdown.bonus > 0) {
+          baseHours = breakdown.base;
+          bonusHours = breakdown.bonus;
+        }
+      }
+    }
 
     return Card(
       margin: EdgeInsets.zero,
@@ -540,7 +648,9 @@ class _InternLogScreenState extends State<InternLogScreen> {
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
-                      '${workHours.toStringAsFixed(1)}시간',
+                      bonusHours != null && baseHours != null
+                          ? '${_formatHours(baseHours)}+${_formatHours(bonusHours)}(가산)'
+                          : '${_formatHours(workHours)}시간',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue),
                     ),
                   ),
@@ -575,6 +685,14 @@ class _InternLogScreenState extends State<InternLogScreen> {
                 ],
               ),
             ],
+            // 22:00~24:00 심야 가산 안내
+            if (bonusHours != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                '22:00~24:00 근무는 1.5배 인정 (가산 ${_formatHours(bonusHours)}시간)',
+                style: TextStyle(fontSize: 11, color: Colors.blue.shade300),
+              ),
+            ],
             // 업무내용 칩
             if (workTypes.isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -592,18 +710,16 @@ class _InternLogScreenState extends State<InternLogScreen> {
                 )).toList(),
               ),
             ],
-            // 누적시간
-            if (accHours != null) ...[
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(Icons.access_time_filled, size: 14, color: Colors.grey),
-                  const SizedBox(width: 4),
-                  Text('누적 ${accHours.toStringAsFixed(1)}시간',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                ],
-              ),
-            ],
+            // 누적시간 (해당 날짜까지의 러닝 합계)
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.access_time_filled, size: 14, color: Colors.grey),
+                const SizedBox(width: 4),
+                Text('누적 ${_formatHours(accHours)}시간',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              ],
+            ),
           ],
         ),
       ),

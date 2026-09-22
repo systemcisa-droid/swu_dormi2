@@ -20,8 +20,11 @@ import 'package:excel/excel.dart' hide Border;
 import 'package:swu_dormi_admin/services/auth_service.dart';
 import 'package:swu_dormi_admin/services/storage_service.dart';
 import 'package:swu_dormi_admin/models/user_model.dart';
+import 'package:swu_dormi_admin/models/excel_student_row.dart';
+import 'package:swu_dormi_admin/utils/xlsx_repair.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_dashboard.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_notices_screen.dart';
+import 'package:swu_dormi_admin/screens/windows/windows_student_council_screen.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_meals_screen.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_facilities_screen.dart';
 import 'package:swu_dormi_admin/screens/windows/windows_students_screen.dart';
@@ -158,6 +161,12 @@ class _WindowsNavigationShellState extends State<WindowsNavigationShell> with Wi
         title: const Text('인턴 관리'),
         body: const WindowsInternManagementTabScreen(),
         selectedTileColor: WidgetStateProperty.all(Colors.teal.withValues(alpha: 0.1)),
+      ),
+      PaneItem(
+        icon: const Icon(FluentIcons.group),
+        title: const Text('사생회'),
+        body: const WindowsStudentCouncilTabScreen(),
+        selectedTileColor: WidgetStateProperty.all(Colors.purple.withValues(alpha: 0.1)),
       ),
       PaneItem(
         icon: const Icon(FluentIcons.flag),
@@ -460,17 +469,49 @@ class _SettingsPageState extends State<_SettingsPage> {
     setState(() => _isUploadingStudentInfo = true);
     try {
       final file = File(path);
+      final originalBytes = await file.readAsBytes();
 
       // 업로드 전 형식 검증 (.xlsx가 아니거나 손상된 파일이면 업로드하지 않음)
+      Excel? excel;
+      Object? decodeError;
       try {
-        Excel.decodeBytes(await file.readAsBytes());
-      } catch (_) {
+        excel = Excel.decodeBytes(originalBytes);
+      } catch (e) {
+        decodeError = e;
+      }
+
+      // 엑셀이 아닌 프로그램(메신저 미리보기, 한컴/WPS, 변환기 등)으로 저장한 .xlsx는 같은 문자열이
+      // 중복 등록되어 있어 엑셀 패키지가 읽지 못하는 경우가 있다. 중복을 정리한 사본으로 다시 시도하고,
+      // 성공하면 정리된 파일을 올린다 (이 파일을 읽는 다른 화면과 층장앱도 함께 정상 동작하도록).
+      var uploadFile = file;
+      var repaired = false;
+      if (excel == null) {
+        for (final byText in [false, true]) {
+          try {
+            final fixed = dedupeSharedStrings(originalBytes, matchByText: byText);
+            if (fixed == null) continue;
+            final decoded = Excel.decodeBytes(fixed);
+            final tmp = File(
+                '${Directory.systemTemp.path}${Platform.pathSeparator}student_info_repaired.xlsx');
+            await tmp.writeAsBytes(fixed, flush: true);
+            excel = decoded;
+            uploadFile = tmp;
+            repaired = true;
+            break;
+          } catch (_) {}
+        }
+      }
+
+      if (excel == null) {
+        final detail = '$decodeError';
         if (mounted) {
           await displayInfoBar(
             context,
             builder: (context, close) => InfoBar(
               title: const Text('오류'),
-              content: const Text('.xlsx 형식의 엑셀 파일만 업로드할 수 있습니다. (구형 .xls 파일은 지원하지 않습니다)'),
+              content: Text('엑셀 파일을 읽지 못했습니다. .xlsx 형식(구형 .xls 불가)이고 손상되지 않은 파일인지 '
+                  '확인해주세요. 엑셀에서 열어 "다른 이름으로 저장(.xlsx)" 후 다시 시도하면 해결되는 경우가 많습니다.\n'
+                  '(상세: ${detail.length > 120 ? '${detail.substring(0, 120)}…' : detail})'),
               severity: InfoBarSeverity.error,
               action: IconButton(icon: const Icon(FluentIcons.clear), onPressed: close),
             ),
@@ -479,7 +520,12 @@ class _SettingsPageState extends State<_SettingsPage> {
         return;
       }
 
-      final downloadUrl = await _storageService.uploadStudentInfoExcel(file);
+      final downloadUrl = await _storageService.uploadStudentInfoExcel(uploadFile);
+      if (repaired) {
+        try {
+          await uploadFile.delete();
+        } catch (_) {}
+      }
       final now = Timestamp.now();
       await FirebaseFirestore.instance.collection('settings').doc('home').set({
         'studentInfoExcelUrl': downloadUrl,
@@ -489,13 +535,18 @@ class _SettingsPageState extends State<_SettingsPage> {
         _studentInfoExcelUrl = downloadUrl;
         _studentInfoExcelUploadedAt = now.toDate();
       });
+      // 학생앱 회원가입 시 "명단에 있는 학번인지" 확인하는 데 쓰는 학번 목록을 함께 갱신한다.
+      final rosterCount = await _syncStudentRoster(excel);
       if (mounted) {
         await displayInfoBar(
           context,
           builder: (context, close) => InfoBar(
-            title: const Text('완료'),
-            content: const Text('사생 기본 정보 엑셀이 업로드되었습니다.'),
-            severity: InfoBarSeverity.success,
+            title: Text(rosterCount > 0 ? '완료' : '업로드 완료 (주의)'),
+            content: Text(rosterCount > 0
+                ? '사생 기본 정보 엑셀이 업로드되었습니다. (회원가입 검증용 학번 $rosterCount건 반영)'
+                    '${repaired ? '\n파일 안의 중복 문자열을 자동으로 정리해서 올렸습니다.' : ''}'
+                : '엑셀은 업로드되었지만 학번 열을 찾지 못해 회원가입 검증용 학번 명단은 갱신하지 않았습니다.'),
+            severity: rosterCount > 0 ? InfoBarSeverity.success : InfoBarSeverity.warning,
             action: IconButton(icon: const Icon(FluentIcons.clear), onPressed: close),
           ),
         );
@@ -515,6 +566,60 @@ class _SettingsPageState extends State<_SettingsPage> {
     } finally {
       if (mounted) setState(() => _isUploadingStudentInfo = false);
     }
+  }
+
+  /// 엑셀의 학번을 student_roster/{학번} 문서로 동기화한다 (학생앱 회원가입 시 명단 확인용).
+  /// 학번 외 개인정보는 저장하지 않고, 이번 엑셀에 없는 학번 문서는 지워 명단을 최신 상태로 맞춘다.
+  /// 학번을 하나도 찾지 못하면(열 인식 실패 등) 기존 명단을 건드리지 않고 0을 반환한다.
+  Future<int> _syncStudentRoster(Excel excel) async {
+    final sheet = excel.sheets.values.first;
+    final rows = sheet.rows
+        .map((row) => row.map((cell) => cell?.value?.toString() ?? '').toList())
+        .toList();
+    if (rows.isEmpty) return 0;
+    final headerIdx = ExcelStudentRow.findHeaderRowIndex(rows);
+    final header = rows[headerIdx];
+    final ids = <String>{};
+    for (final row in rows.skip(headerIdx + 1)) {
+      // 숫자 셀은 '2026123456.0'처럼 읽힐 수 있어 소수점 이하를 떼어낸다.
+      final id = (ExcelStudentRow.fromRow(header, row).studentId ?? '')
+          .trim()
+          .replaceFirst(RegExp(r'\.0+$'), '');
+      if (id.isNotEmpty) ids.add(id);
+    }
+    if (ids.isEmpty) return 0;
+
+    final firestore = FirebaseFirestore.instance;
+    final col = firestore.collection('student_roster');
+    final existing = await col.get();
+    var batch = firestore.batch();
+    var ops = 0;
+    Future<void> flushIfFull() async {
+      // Firestore batch는 500건 제한이 있어 넉넉히 400건마다 커밋한다.
+      if (ops >= 400) {
+        await batch.commit();
+        batch = firestore.batch();
+        ops = 0;
+      }
+    }
+
+    for (final doc in existing.docs) {
+      if (doc.id == '_meta' || ids.contains(doc.id)) continue;
+      batch.delete(doc.reference);
+      ops++;
+      await flushIfFull();
+    }
+    for (final id in ids) {
+      batch.set(col.doc(id), {'updatedAt': FieldValue.serverTimestamp()});
+      ops++;
+      await flushIfFull();
+    }
+    batch.set(col.doc('_meta'), {
+      'count': ids.length,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+    return ids.length;
   }
 
   Future<void> _viewStudentInfoExcel() async {
@@ -766,10 +871,10 @@ class _SettingsPageState extends State<_SettingsPage> {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 현재 배너 미리보기
+                          // 현재 배너 미리보기 (실제 배너는 1080x1920 세로형이므로 9:16 비율로 보여준다)
                           Container(
-                            width: 320,
-                            height: 180,
+                            width: 180,
+                            height: 320,
                             decoration: BoxDecoration(
                               border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
                               borderRadius: BorderRadius.circular(4),

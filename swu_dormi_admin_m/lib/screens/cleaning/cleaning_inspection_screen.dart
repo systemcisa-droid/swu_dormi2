@@ -219,13 +219,13 @@ const List<String> kFloorOptions = [
   '국제생활관 B동 2층',
   '국제생활관 B동 3층',
   '바롬인성교육관 10층',
-  '샬롬하우스(겨울방학) A동 5층',
-  '샬롬하우스(겨울방학) A동 6층',
-  '샬롬하우스(겨울방학) A동 7층',
-  '국제생활관(겨울방학) A동 1층',
-  '국제생활관(겨울방학) A동 2층',
-  '국제생활관(겨울방학) B동 2층',
-  '국제생활관(겨울방학) B동 3층',
+  '샬롬하우스(방학) A동 5층',
+  '샬롬하우스(방학) A동 6층',
+  '샬롬하우스(방학) A동 7층',
+  '국제생활관(방학) A동 1층',
+  '국제생활관(방학) A동 2층',
+  '국제생활관(방학) B동 2층',
+  '국제생활관(방학) B동 3층',
 ];
 
 // ══════════════════════════════════════════════════════════════
@@ -377,9 +377,9 @@ class _CleaningInspectionContentState
         ? ((scheduleDoc.data() as Map<String, dynamic>)['floor'] ?? '') as String
         : '';
     String? scheduleBuilding;
-    if (scheduleFloor.startsWith('샬롬하우스(겨울방학)')) { scheduleBuilding = '샬롬하우스(겨울방학)'; }
+    if (scheduleFloor.startsWith('샬롬하우스(방학)')) { scheduleBuilding = '샬롬하우스(방학)'; }
     else if (scheduleFloor.startsWith('샬롬하우스')) { scheduleBuilding = '샬롬하우스'; }
-    else if (scheduleFloor.startsWith('국제생활관(겨울방학)')) { scheduleBuilding = '국제생활관(겨울방학)'; }
+    else if (scheduleFloor.startsWith('국제생활관(방학)')) { scheduleBuilding = '국제생활관(방학)'; }
     else if (scheduleFloor.startsWith('국제생활관')) { scheduleBuilding = '국제생활관'; }
     else if (scheduleFloor.startsWith('바롬인성교육관')) { scheduleBuilding = '바롬인성교육관'; }
 
@@ -1252,9 +1252,9 @@ class _CleaningInspectionContentState
   /// '샬롬하우스 A동 3층' 같은 구역 문자열에서 건물명만 뽑는다.
   static String? _buildingFromFloorLabel(String? floor) {
     if (floor == null || floor.isEmpty) return null;
-    if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
+    if (floor.startsWith('샬롬하우스(방학)')) return '샬롬하우스(방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
-    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
+    if (floor.startsWith('국제생활관(방학)')) return '국제생활관(방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;
@@ -1884,12 +1884,12 @@ class _CleaningInspectionContentState
       final scheduleInspType = scheduleData['inspectionType'] as String? ?? widget.inspectionType;
       final floorStr = scheduleData['floor']?.toString() ?? '';
       final String? scheduleBuilding;
-      if (floorStr.startsWith('샬롬하우스(겨울방학)')) {
-        scheduleBuilding = '샬롬하우스(겨울방학)';
+      if (floorStr.startsWith('샬롬하우스(방학)')) {
+        scheduleBuilding = '샬롬하우스(방학)';
       } else if (floorStr.startsWith('샬롬하우스')) {
         scheduleBuilding = '샬롬하우스';
-      } else if (floorStr.startsWith('국제생활관(겨울방학)')) {
-        scheduleBuilding = '국제생활관(겨울방학)';
+      } else if (floorStr.startsWith('국제생활관(방학)')) {
+        scheduleBuilding = '국제생활관(방학)';
       } else if (floorStr.startsWith('국제생활관')) {
         scheduleBuilding = '국제생활관';
       } else if (floorStr.startsWith('바롬인성교육관')) {
@@ -2803,9 +2803,9 @@ class _RoomInspectionHistoryContentState
 
   static String? _buildingFromFloor(String? floor) {
     if (floor == null || floor.isEmpty) return null;
-    if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
+    if (floor.startsWith('샬롬하우스(방학)')) return '샬롬하우스(방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
-    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
+    if (floor.startsWith('국제생활관(방학)')) return '국제생활관(방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;
@@ -2817,7 +2817,7 @@ class _RoomInspectionHistoryContentState
       if ((roomNum >= 233 && roomNum <= 260) || (roomNum >= 301 && roomNum <= 329)) return 'B동';
       return null;
     }
-    if (dormBuilding == '샬롬하우스(겨울방학)') return 'A동'; // 201~220, 301~320, 401~420 모두 A동
+    if (dormBuilding == '샬롬하우스(방학)') return 'A동'; // 201~220, 301~320, 401~420 모두 A동
     final last = roomNum % 100;
     if (last >= 1 && last <= 20) return 'A동';
     if (last >= 21 && last <= 35) return 'B동';
@@ -2825,9 +2825,9 @@ class _RoomInspectionHistoryContentState
   }
 
   static int _buildingOrder(String key) {
-    if (key.startsWith('샬롬하우스(겨울방학)')) return 3;
+    if (key.startsWith('샬롬하우스(방학)')) return 3;
     if (key.startsWith('샬롬하우스')) return 0;
-    if (key.startsWith('국제생활관(겨울방학)')) return 4;
+    if (key.startsWith('국제생활관(방학)')) return 4;
     if (key.startsWith('국제생활관')) return 1;
     if (key.startsWith('바롬인성교육관')) return 2;
     return 5;
@@ -2971,7 +2971,7 @@ class _RoomInspectionHistoryContentState
           final wing = _computeWing(dorm, n);
           if (wing != null) {
             userFloorLabels[roomKey] = '$dorm $wing $floorNum층';
-          } else if (dorm == '샬롬하우스(겨울방학)') {
+          } else if (dorm == '샬롬하우스(방학)') {
             userFloorLabels[roomKey] = '$dorm A동 $floorNum층';
           }
         }
@@ -3046,9 +3046,9 @@ class _RoomInspectionHistoryContentState
         }
         // 샬롬하우스 2~7층 (A동 1~20, B동 21~40)
         for (final floor in kFloorOptions) {
-          final dorm = floor.startsWith('샬롬하우스(겨울방학)') ? '샬롬하우스(겨울방학)'
+          final dorm = floor.startsWith('샬롬하우스(방학)') ? '샬롬하우스(방학)'
               : floor.startsWith('샬롬하우스') ? '샬롬하우스'
-              : floor.startsWith('국제생활관(겨울방학)') ? '국제생활관(겨울방학)'
+              : floor.startsWith('국제생활관(방학)') ? '국제생활관(방학)'
               : floor.startsWith('국제생활관') ? '국제생활관'
               : floor.startsWith('바롬인성교육관') ? '바롬인성교육관'
               : null;
@@ -3073,7 +3073,7 @@ class _RoomInspectionHistoryContentState
               userFloorLabels.putIfAbsent(roomKey, () => floor);
             }
             continue;
-          } else if (dorm == '샬롬하우스(겨울방학)') {
+          } else if (dorm == '샬롬하우스(방학)') {
             final base = floorNum * 100;
             roomNums = [for (var i = base + 1; i <= base + 20; i++) i];
           } else {
@@ -3439,7 +3439,7 @@ class _RoomInspectionHistoryContentState
     // monthly 카드용: 거주인원/인실수
     final roomKey = '$building|$roomNumber';
     final residentCount = _residentCountByRoom[roomKey] ?? 0;
-    final roomCapacity = (building == '샬롬하우스' || building == '샬롬하우스(겨울방학)')
+    final roomCapacity = (building == '샬롬하우스' || building == '샬롬하우스(방학)')
         ? shalomRoomCapacity(roomNumber)
         : null;
 
@@ -3915,7 +3915,7 @@ class _RoomHistoryDetailScreen extends StatelessWidget {
       if (sId != null && scheduleMap.containsKey(sId)) {
         final floor = (scheduleMap[sId]?['floor'] ?? '') as String;
         if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
-        if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
+        if (floor.startsWith('국제생활관(방학)')) return '국제생활관(방학)';
         if (floor.startsWith('국제생활관')) return '국제생활관';
         if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
       }

@@ -30,6 +30,11 @@ void main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+    // [디버그] Firebase 초기화 직후 로컬에 복원된 세션이 있는지 확인.
+    // null이면 이 시점에 이미 세션이 없다는 뜻이므로 Firebase Auth persistence
+    // 자체의 문제로 확정할 수 있다.
+    debugPrint('[Auth디버그] Firebase.initializeApp 직후 currentUser='
+        '${FirebaseAuth.instance.currentUser?.email ?? "null"}');
     // 한국어 locale 초기화
     await initializeDateFormatting('ko_KR', null);
     // FCM 초기화
@@ -102,6 +107,18 @@ class _AuthWrapperState extends State<AuthWrapper> {
   bool _privacyAgreed = false;
   bool _checkingPrivacy = true;
 
+  // authStateChanges()는 호출할 때마다 새 Stream 인스턴스를 반환하므로,
+  // build()에서 매번 새로 얻으면 StreamBuilder가 재구독되어 기존 로그인 상태를
+  // 잃어버리고(ConnectionState.waiting) 새 스트림의 첫 이벤트를 기다리게 된다.
+  // 이 첫 이벤트가 세션 복원 전 null이면 그대로 로그인 화면에 머물러
+  // "재실행 시 자동 로그아웃"처럼 보이는 문제가 생길 수 있어 한 번만 생성해 캐싱한다.
+  late final Stream<User?> _authStateChanges = _authService.authStateChanges;
+
+  // 이용 정지 여부 확인 Future도 build()마다 새로 생성되면 FutureBuilder가
+  // 매번 재시작되어 화면이 깜빡이거나 불필요한 Firestore 조회가 반복되므로,
+  // 로그인 상태가 확인된 시점에 한 번만 생성해 캐싱한다.
+  Future<bool>? _disabledCheckFuture;
+
   @override
   void initState() {
     super.initState();
@@ -132,9 +149,17 @@ class _AuthWrapperState extends State<AuthWrapper> {
       );
     }
 
-    return StreamBuilder(
-      stream: _authService.authStateChanges,
+    return StreamBuilder<User?>(
+      stream: _authStateChanges,
+      // FirebaseAuth가 세션 복원을 완료하기 전 스트림의 첫 이벤트를 기다리는
+      // 동안에도, 이미 기기에 저장된 세션이 있다면 currentUser로 즉시 알 수
+      // 있다. 이 값을 initialData로 주면 그 대기 구간에 로그인 화면이
+      // 잠깐 보였다가 사라지는 깜빡임(체감상 "자동 로그아웃")을 막을 수 있다.
+      initialData: FirebaseAuth.instance.currentUser,
       builder: (context, snapshot) {
+        // [디버그] 스트림이 실제로 방출하는 값과 연결 상태를 확인한다.
+        debugPrint('[Auth디버그] StreamBuilder state=${snapshot.connectionState} '
+            'hasData=${snapshot.hasData} email=${snapshot.data?.email ?? "null"}');
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
             body: Center(child: CircularProgressIndicator()),
@@ -143,8 +168,11 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         if (snapshot.hasData) {
           // 이용 정지된 계정이면 즉시 로그아웃 (App Store 가이드라인 1.2)
+          // Future는 로그인 상태가 확인될 때 한 번만 생성해 캐싱한다(매 build마다
+          // 재생성하면 FutureBuilder가 재시작되어 화면이 깜빡일 수 있음).
+          _disabledCheckFuture ??= _authService.isCurrentUserDisabled();
           return FutureBuilder<bool>(
-            future: _authService.isCurrentUserDisabled(),
+            future: _disabledCheckFuture,
             builder: (context, disabledSnap) {
               if (disabledSnap.data == true) {
                 _authService.signOut();
@@ -155,6 +183,9 @@ class _AuthWrapperState extends State<AuthWrapper> {
           );
         }
 
+        // 로그아웃 상태로 돌아왔으므로 다음 로그인 시 이용 정지 여부를
+        // 다시 확인할 수 있도록 캐시를 초기화한다.
+        _disabledCheckFuture = null;
         return const LoginScreen();
       },
     );
@@ -208,12 +239,12 @@ class _NavigationShellState extends State<NavigationShell> {
     final wingMatch = RegExp(r'[A-Z]동').firstMatch(assignedFloor);
     final floorMatch = RegExp(r'(\d+)층').firstMatch(assignedFloor);
     String dormBuilding;
-    if (assignedFloor.startsWith('샬롬하우스(겨울방학)')) {
-      dormBuilding = '샬롬하우스(겨울방학)';
+    if (assignedFloor.startsWith('샬롬하우스(방학)')) {
+      dormBuilding = '샬롬하우스(방학)';
     } else if (assignedFloor.startsWith('샬롬하우스')) {
       dormBuilding = '샬롬하우스';
-    } else if (assignedFloor.startsWith('국제생활관(겨울방학)')) {
-      dormBuilding = '국제생활관(겨울방학)';
+    } else if (assignedFloor.startsWith('국제생활관(방학)')) {
+      dormBuilding = '국제생활관(방학)';
     } else if (assignedFloor.startsWith('국제생활관')) {
       dormBuilding = '국제생활관';
     } else if (assignedFloor.startsWith('바롬인성교육관')) {

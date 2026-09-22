@@ -1,4 +1,15 @@
-import 'package:flutter/material.dart' hide Colors, FilledButton, IconButton, Card, ListTile, showDialog, Divider, Checkbox, Tooltip, ButtonStyle;
+import 'package:flutter/material.dart'
+    hide
+        Colors,
+        FilledButton,
+        IconButton,
+        Card,
+        ListTile,
+        showDialog,
+        Divider,
+        Checkbox,
+        Tooltip,
+        ButtonStyle;
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:swu_dormi_admin/widgets/shimmer.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,7 +18,8 @@ import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'package:excel/excel.dart' hide Border;
 import 'package:file_picker/file_picker.dart';
-import 'package:swu_dormi_admin/screens/windows/windows_cleaning_inspection_screen.dart' show kFloorOptions, roomCapacityLabel;
+import 'package:swu_dormi_admin/screens/windows/windows_cleaning_inspection_screen.dart'
+    show kFloorOptions, roomCapacityLabel;
 import 'package:swu_dormi_admin/screens/windows/windows_attendance_history_screen.dart';
 import 'package:swu_dormi_admin/models/excel_student_row.dart';
 import 'package:swu_dormi_admin/data/point_codes.dart';
@@ -73,14 +85,20 @@ class _WindowsAttendanceTabScreenState
               : Colors.grey.withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: isSelected ? _accentColor : Colors.grey.withValues(alpha: 0.2),
+            color: isSelected
+                ? _accentColor
+                : Colors.grey.withValues(alpha: 0.2),
             width: isSelected ? 1.5 : 1,
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: isSelected ? _accentColor : Colors.grey),
+            Icon(
+              icon,
+              size: 16,
+              color: isSelected ? _accentColor : Colors.grey,
+            ),
             const SizedBox(width: 8),
             Text(
               label,
@@ -101,7 +119,8 @@ class WindowsAttendanceScreen extends StatefulWidget {
   const WindowsAttendanceScreen({super.key});
 
   @override
-  State<WindowsAttendanceScreen> createState() => _WindowsAttendanceScreenState();
+  State<WindowsAttendanceScreen> createState() =>
+      _WindowsAttendanceScreenState();
 }
 
 class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
@@ -117,6 +136,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
   List<ExcelStudentRow> _roomUnregisteredStudents = [];
   final Map<String, String?> _adminStatuses = {};
   final Map<String, String?> _floorStatuses = {};
+  // 층장이 작성한 학생별 비고 (자유 텍스트, 읽기 전용): userId → 비고
+  final Map<String, String?> _remarks = {};
   Map<String, dynamic>? _selectedEvent;
   bool _isLoadingEvents = true;
   bool _isLoadingRecords = false;
@@ -131,7 +152,12 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
 
   // 출석체크 불가 상태. '퇴사'는 세분화 전 레거시 데이터 호환을 위해 함께 둔다.
   static const _blockedStatuses = {
-    '퇴사', '만기퇴사', '자진퇴사', '강제퇴사', '영구퇴사', '바롬인성교육관',
+    '퇴사',
+    '만기퇴사',
+    '자진퇴사',
+    '강제퇴사',
+    '영구퇴사',
+    '바롬인성교육관',
   };
   static const _blockedStatusColors = {
     '퇴사': Color(0xFF9E9E9E),
@@ -142,10 +168,11 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
     '바롬인성교육관': Color(0xFFFF9800),
   };
 
-  // 층장이 지정한 상태(부재/외박미수정) 표시 색상 — 읽기 전용
+  // 층장이 지정한 상태(부재/외박미수정/외박미신청) 표시 색상 — 읽기 전용
   static const _floorStatusColors = {
     '부재': Color(0xFFF44336),
     '외박미수정': Color(0xFF2196F3),
+    '외박미신청': Color(0xFFF44336),
   };
 
   @override
@@ -191,7 +218,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
   // 부가 기능이므로 실패해도 사용자에게 에러를 표시하지 않고 조용히 무시한다.
   Future<void> _loadUnregisteredStudents() async {
     try {
-      final settingsDoc = await _firestore.collection('settings').doc('home').get();
+      final settingsDoc = await _firestore
+          .collection('settings')
+          .doc('home')
+          .get();
       final excelUrl = settingsDoc.data()?['studentInfoExcelUrl'] as String?;
       if (excelUrl == null || excelUrl.trim().isEmpty) return;
 
@@ -200,7 +230,9 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       final excel = Excel.decodeBytes(response.bodyBytes);
       final sheet = excel.sheets.values.first;
       final rows = sheet.rows
-          .map((row) => row.map((cell) => cell?.value?.toString() ?? '').toList())
+          .map(
+            (row) => row.map((cell) => cell?.value?.toString() ?? '').toList(),
+          )
           .toList();
       if (rows.isEmpty) return;
 
@@ -234,8 +266,9 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         if (_selectedEvent != null) {
           _updateRoomUnregisteredStudents(
             _selectedEvent!['roomNumber'] as String?,
-            dormBuilding:
-                _dormBuildingFromFloor(_selectedEvent!['floor'] as String?),
+            dormBuilding: _dormBuildingFromFloor(
+              _selectedEvent!['floor'] as String?,
+            ),
           );
         }
       });
@@ -263,10 +296,12 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         return;
       }
       _roomUnregisteredStudents = _unregisteredStudents
-          .where((s) =>
-              s.roomNumber != null &&
-              floorRoomNumbers.contains(s.roomNumber) &&
-              matchesBuilding(s))
+          .where(
+            (s) =>
+                s.roomNumber != null &&
+                floorRoomNumbers.contains(s.roomNumber) &&
+                matchesBuilding(s),
+          )
           .toList();
       return;
     }
@@ -279,8 +314,11 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         .toList();
   }
 
-  Future<void> _loadEvents() async {
-    setState(() { _isLoadingEvents = true; _eventsError = null; });
+  Future<void> _loadEvents({bool showLoading = true}) async {
+    setState(() {
+      if (showLoading) _isLoadingEvents = true;
+      _eventsError = null;
+    });
     try {
       final snap = await _firestore.collection('attendance_events').get();
       final list = <Map<String, dynamic>>[];
@@ -290,20 +328,41 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         list.add(m);
       }
       list.sort((a, b) {
-        // 1) 최근 생성된 배치가 위로 오도록 정렬 (분 단위로 묶어서 같은 배치인지 판단)
+        // 1) 일정(날짜, 시간 제외) 최근순이 최우선 기준이다.
         final aCreatedAt = a['createdAt'] as Timestamp?;
         final bCreatedAt = b['createdAt'] as Timestamp?;
         if (aCreatedAt == null && bCreatedAt != null) return 1;
         if (aCreatedAt != null && bCreatedAt == null) return -1;
         if (aCreatedAt != null && bCreatedAt != null) {
-          final aMinute = aCreatedAt.toDate().millisecondsSinceEpoch ~/ 60000;
-          final bMinute = bCreatedAt.toDate().millisecondsSinceEpoch ~/ 60000;
-          if (aMinute != bMinute) return bMinute.compareTo(aMinute);
+          final aDate = aCreatedAt.toDate();
+          final bDate = bCreatedAt.toDate();
+          final aDay = DateTime(aDate.year, aDate.month, aDate.day);
+          final bDay = DateTime(bDate.year, bDate.month, bDate.day);
+          if (aDay != bDay) return bDay.compareTo(aDay);
         }
-        // 2) 같은 배치 내에서는 호실 오름차순
-        final aRoom = int.tryParse((a['roomNumber'] as String?) ?? '') ?? 0;
-        final bRoom = int.tryParse((b['roomNumber'] as String?) ?? '') ?? 0;
-        return aRoom.compareTo(bRoom);
+        // 2) 같은 날짜 내에서는 kFloorOptions에 정의된 구역 순서(건물→동→층)로 묶는다.
+        final aFloor = (a['floor'] as String?) ?? '';
+        final bFloor = (b['floor'] as String?) ?? '';
+        final aIdx = kFloorOptions.indexOf(aFloor);
+        final bIdx = kFloorOptions.indexOf(bFloor);
+        // 목록에 없는 값(구버전 데이터 등)은 맨 뒤로 보낸다.
+        final aRank = aIdx == -1 ? kFloorOptions.length : aIdx;
+        final bRank = bIdx == -1 ? kFloorOptions.length : bIdx;
+        if (aRank != bRank) return aRank.compareTo(bRank);
+        // 3) kFloorOptions에 없는 값끼리는 문자열로라도 묶는다.
+        if (aFloor != bFloor) return aFloor.compareTo(bFloor);
+        // 4) 같은 날짜·구역 내에서는 생성 시각 최근순.
+        if (aCreatedAt != null && bCreatedAt != null) {
+          final cmp = bCreatedAt.compareTo(aCreatedAt);
+          if (cmp != 0) return cmp;
+        }
+        // 5) 마지막으로 호실 오름차순 (바롬 '1001-A' 형식도 '-' 앞 숫자로 비교)
+        final rawA = (a['roomNumber'] as String?) ?? '';
+        final rawB = (b['roomNumber'] as String?) ?? '';
+        final aRoom = int.tryParse(rawA.split('-').first) ?? 0;
+        final bRoom = int.tryParse(rawB.split('-').first) ?? 0;
+        if (aRoom != bRoom) return aRoom.compareTo(bRoom);
+        return rawA.compareTo(rawB);
       });
       if (!mounted) return;
       setState(() {
@@ -315,14 +374,27 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() { _isLoadingEvents = false; _eventsError = e.toString(); });
+      setState(() {
+        _isLoadingEvents = false;
+        _eventsError = e.toString();
+      });
     }
   }
 
   Future<void> _loadRecords(String eventId) async {
-    setState(() { _isLoadingRecords = true; _recordsError = null; _roomStudents = []; _adminStatuses.clear(); _floorStatuses.clear(); });
+    setState(() {
+      _isLoadingRecords = true;
+      _recordsError = null;
+      _roomStudents = [];
+      _adminStatuses.clear();
+      _floorStatuses.clear();
+      _remarks.clear();
+    });
 
-    final event = _events.firstWhere((e) => e['_id'] == eventId, orElse: () => {});
+    final event = _events.firstWhere(
+      (e) => e['_id'] == eventId,
+      orElse: () => {},
+    );
     final roomNumber = event['roomNumber'] as String?;
     final isFloorWide = event['isFloorWide'] == true;
     final floor = event['floor'] as String?;
@@ -339,8 +411,12 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         list.add(m);
       }
       list.sort((a, b) {
-        final aT = (a['checkedInAt'] is Timestamp) ? (a['checkedInAt'] as Timestamp).toDate() : DateTime(2000);
-        final bT = (b['checkedInAt'] is Timestamp) ? (b['checkedInAt'] as Timestamp).toDate() : DateTime(2000);
+        final aT = (a['checkedInAt'] is Timestamp)
+            ? (a['checkedInAt'] as Timestamp).toDate()
+            : DateTime(2000);
+        final bT = (b['checkedInAt'] is Timestamp)
+            ? (b['checkedInAt'] as Timestamp).toDate()
+            : DateTime(2000);
         return bT.compareTo(aT);
       });
 
@@ -362,19 +438,33 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
               .where((doc) => (doc.data()['role'] as String?) == 'student')
               .map((doc) => {'id': doc.id, ...doc.data()})
               .toList();
-          students.sort((a, b) =>
-              (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? ''));
+          students.sort(
+            (a, b) => (a['name'] as String? ?? '').compareTo(
+              b['name'] as String? ?? '',
+            ),
+          );
         } catch (_) {}
       }
 
       final Map<String, String?> savedAdminStatuses = {};
       final Map<String, String?> savedFloorStatuses = {};
+      final Map<String, String?> savedRemarks = {};
       try {
-        final eventDoc = await _firestore.collection('attendance_events').doc(eventId).get();
-        final rawAdmin = (eventDoc.data()?['adminStatuses'] as Map<String, dynamic>?) ?? {};
+        final eventDoc = await _firestore
+            .collection('attendance_events')
+            .doc(eventId)
+            .get();
+        final rawAdmin =
+            (eventDoc.data()?['adminStatuses'] as Map<String, dynamic>?) ?? {};
         rawAdmin.forEach((uid, st) => savedAdminStatuses[uid] = st as String?);
-        final rawFloor = (eventDoc.data()?['floorStatuses'] as Map<String, dynamic>?) ?? {};
+        final rawFloor =
+            (eventDoc.data()?['floorStatuses'] as Map<String, dynamic>?) ?? {};
         rawFloor.forEach((uid, st) => savedFloorStatuses[uid] = st as String?);
+        final rawRemarks =
+            (eventDoc.data()?['remarks'] as Map<String, dynamic>?) ?? {};
+        rawRemarks.forEach(
+          (uid, remark) => savedRemarks[uid] = remark as String?,
+        );
       } catch (_) {}
 
       if (!mounted) return;
@@ -391,6 +481,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         savedAdminStatuses.forEach((uid, st) => _adminStatuses[uid] = st);
         _floorStatuses.clear();
         savedFloorStatuses.forEach((uid, st) => _floorStatuses[uid] = st);
+        _remarks.clear();
+        savedRemarks.forEach((uid, remark) => _remarks[uid] = remark);
         _isLoadingRecords = false;
       });
     } catch (e) {
@@ -412,21 +504,30 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       String? adminName;
       if (currentUser != null) {
         try {
-          final doc = await _firestore.collection('users').doc(currentUser.uid).get();
+          final doc = await _firestore
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
           adminName = doc.data()?['name'] as String?;
         } catch (_) {}
       }
       await _firestore.collection('attendance_events').doc(eventId).update({
         'adminStatuses.$userId': status ?? FieldValue.delete(),
-        'adminStatusSetBy.$userId': status != null ? currentUser?.email : FieldValue.delete(),
-        'adminStatusSetByName.$userId': status != null ? (adminName ?? currentUser?.email) : FieldValue.delete(),
+        'adminStatusSetBy.$userId': status != null
+            ? currentUser?.email
+            : FieldValue.delete(),
+        'adminStatusSetByName.$userId': status != null
+            ? (adminName ?? currentUser?.email)
+            : FieldValue.delete(),
       });
     });
   }
 
   List<Map<String, dynamic>> get _filteredEvents {
     if (_filterFloor == null) return _events;
-    return _events.where((e) => (e['floor'] as String? ?? '') == _filterFloor).toList();
+    return _events
+        .where((e) => (e['floor'] as String? ?? '') == _filterFloor)
+        .toList();
   }
 
   @override
@@ -480,13 +581,19 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                         const Spacer(),
                         if (_isSelectionMode) ...[
                           Checkbox(
-                            checked: _filteredEvents.isNotEmpty &&
-                                _selectedEventIds.length == _filteredEvents.length,
+                            checked:
+                                _filteredEvents.isNotEmpty &&
+                                _selectedEventIds.length ==
+                                    _filteredEvents.length,
                             onChanged: (v) => setState(() {
                               if (v == true) {
                                 _selectedEventIds
                                   ..clear()
-                                  ..addAll(_filteredEvents.map((e) => e['_id'] as String));
+                                  ..addAll(
+                                    _filteredEvents.map(
+                                      (e) => e['_id'] as String,
+                                    ),
+                                  );
                               } else {
                                 _selectedEventIds.clear();
                               }
@@ -495,17 +602,27 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                           const SizedBox(width: 4),
                           Text(
                             '${_selectedEventIds.length}개 선택',
-                            style: TextStyle(fontSize: 12, color: Colors.grey[100]),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[100],
+                            ),
                           ),
                           const SizedBox(width: 8),
                           SizedBox(
                             height: 26,
                             child: Button(
                               style: ButtonStyle(
-                                backgroundColor: WidgetStateProperty.all(Colors.red.withOpacity(0.1)),
+                                backgroundColor: WidgetStateProperty.all(
+                                  Colors.red.withOpacity(0.1),
+                                ),
                               ),
-                              onPressed: _selectedEventIds.isEmpty ? null : _deleteSelectedEvents,
-                              child: const Text('선택 삭제', style: TextStyle(fontSize: 11)),
+                              onPressed: _selectedEventIds.isEmpty
+                                  ? null
+                                  : _deleteSelectedEvents,
+                              child: const Text(
+                                '선택 삭제',
+                                style: TextStyle(fontSize: 11),
+                              ),
                             ),
                           ),
                           const SizedBox(width: 4),
@@ -528,11 +645,16 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                   ),
                   // 서브필터 — 점검 구역
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       border: Border(
                         bottom: BorderSide(
-                          color: FluentTheme.of(context).resources.dividerStrokeColorDefault,
+                          color: FluentTheme.of(
+                            context,
+                          ).resources.dividerStrokeColorDefault,
                         ),
                       ),
                     ),
@@ -552,20 +674,32 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                   ),
                   Expanded(
                     child: _isLoadingEvents
-                        ? ShimmerList(itemBuilder: () => const AttendanceEventShimmer(), count: 5, padding: const EdgeInsets.all(12))
+                        ? ShimmerList(
+                            itemBuilder: () => const AttendanceEventShimmer(),
+                            count: 5,
+                            padding: const EdgeInsets.all(12),
+                          )
                         : _eventsError != null
-                            ? Center(child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Text('오류: $_eventsError', style: TextStyle(color: Colors.red, fontSize: 12)),
-                              ))
-                        : _filteredEvents.isEmpty
-                            ? const Center(child: Text('등록된 이벤트가 없습니다'))
-                            : ListView.builder(
-                                itemCount: _filteredEvents.length,
-                                itemBuilder: (context, index) {
-                                  return _buildEventCard(_filteredEvents[index]);
-                                },
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16),
+                              child: Text(
+                                '오류: $_eventsError',
+                                style: TextStyle(
+                                  color: Colors.red,
+                                  fontSize: 12,
+                                ),
                               ),
+                            ),
+                          )
+                        : _filteredEvents.isEmpty
+                        ? const Center(child: Text('등록된 이벤트가 없습니다'))
+                        : ListView.builder(
+                            itemCount: _filteredEvents.length,
+                            itemBuilder: (context, index) {
+                              return _buildEventCard(_filteredEvents[index]);
+                            },
+                          ),
                   ),
                 ],
               ),
@@ -582,8 +716,11 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
               ),
               child: _selectedEvent == null
                   ? const Center(
-                      child: Text('이벤트를 선택하면 출석 기록이 표시됩니다',
-                          style: TextStyle(color: Color(0xFF999999))))
+                      child: Text(
+                        '이벤트를 선택하면 출석 기록이 표시됩니다',
+                        style: TextStyle(color: Color(0xFF999999)),
+                      ),
+                    )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -591,13 +728,26 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                         const Divider(),
                         Expanded(
                           child: _isLoadingRecords
-                              ? ShimmerList(itemBuilder: () => const AttendanceRowShimmer(), count: 8, padding: EdgeInsets.zero)
+                              ? ShimmerList(
+                                  itemBuilder: () =>
+                                      const AttendanceRowShimmer(),
+                                  count: 8,
+                                  padding: EdgeInsets.zero,
+                                )
                               : _recordsError != null
-                                  ? Center(child: Padding(
-                                      padding: const EdgeInsets.all(16),
-                                      child: Text('오류: $_recordsError', style: TextStyle(color: Colors.red, fontSize: 12)),
-                                    ))
-                                  : _buildStudentList(),
+                              ? Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16),
+                                    child: Text(
+                                      '오류: $_recordsError',
+                                      style: TextStyle(
+                                        color: Colors.red,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : _buildStudentList(),
                         ),
                       ],
                     ),
@@ -617,9 +767,9 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
 
   static String? _dormBuildingFromFloor(String? floor) {
     if (floor == null || floor.isEmpty) return null;
-    if (floor.startsWith('샬롬하우스(겨울방학)')) return '샬롬하우스(겨울방학)';
+    if (floor.startsWith('샬롬하우스(방학)')) return '샬롬하우스(방학)';
     if (floor.startsWith('샬롬하우스')) return '샬롬하우스';
-    if (floor.startsWith('국제생활관(겨울방학)')) return '국제생활관(겨울방학)';
+    if (floor.startsWith('국제생활관(방학)')) return '국제생활관(방학)';
     if (floor.startsWith('국제생활관')) return '국제생활관';
     if (floor.startsWith('바롬인성교육관')) return '바롬인성교육관';
     return null;
@@ -631,9 +781,13 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
     final location = (event['location'] ?? '') as String;
     final floor = (event['floor'] as String?) ?? '';
     final status = (event['status'] ?? 'active') as String;
-    final eventDateVal = event['eventDate'];
-    final eventDate = (eventDateVal is Timestamp) ? eventDateVal.toDate() : DateTime.now();
-    final attendeeCount = (event['attendeeCount'] is num) ? (event['attendeeCount'] as num).toInt() : 0;
+    final eventDateVal = event['createdAt'];
+    final eventDate = (eventDateVal is Timestamp)
+        ? eventDateVal.toDate()
+        : null;
+    final attendeeCount = (event['attendeeCount'] is num)
+        ? (event['attendeeCount'] as num).toInt()
+        : 0;
     final isSelected = _selectedEvent?['_id'] == eventId;
     final isActive = status == 'active';
 
@@ -644,7 +798,9 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
     final buildingColor = _buildingColor(dormBuilding);
     final displayBuilding = dormBuilding ?? '';
     final displayArea = floor.isNotEmpty ? floor : location;
-    final capacityLabel = dormBuilding == '샬롬하우스' ? roomCapacityLabel(roomNumber) : '';
+    final capacityLabel = dormBuilding == '샬롬하우스'
+        ? roomCapacityLabel(roomNumber)
+        : '';
 
     final isChecked = _selectedEventIds.contains(eventId);
     return GestureDetector(
@@ -670,8 +826,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
             color: isChecked
                 ? Colors.red
                 : isSelected
-                    ? Colors.blue
-                    : Colors.grey.withOpacity(0.2),
+                ? Colors.blue
+                : Colors.grey.withOpacity(0.2),
             width: (isChecked || isSelected) ? 1.5 : 1,
           ),
         ),
@@ -715,28 +871,45 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                       Row(
                         children: [
                           Expanded(
-                            child: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            child: Text(
+                              title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color: isActive ? Colors.green.withOpacity(0.15) : Colors.grey.withOpacity(0.15),
+                              color: isActive
+                                  ? Colors.green.withOpacity(0.15)
+                                  : Colors.grey.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               isActive ? '진행중' : '종료',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: isActive ? Colors.green.dark : Colors.grey,
+                                color: isActive
+                                    ? Colors.green.dark
+                                    : Colors.grey,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
                           ),
                           const SizedBox(width: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color: isFireDrill ? Colors.red.withOpacity(0.15) : Colors.blue.withOpacity(0.15),
+                              color: isFireDrill
+                                  ? Colors.red.withOpacity(0.15)
+                                  : Colors.blue.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -751,7 +924,7 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                         ],
                       ),
                       const SizedBox(height: 4),
-                      
+
                       if (roomNumber.isNotEmpty)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 2),
@@ -759,7 +932,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                             capacityLabel.isNotEmpty
                                 ? '$roomNumber호 ($capacityLabel)'
                                 : '$roomNumber호',
-                            style: TextStyle(fontSize: 12, color: Colors.grey[100]),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[100],
+                            ),
                           ),
                         ),
                       if (displayArea.isNotEmpty)
@@ -767,41 +943,81 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                           padding: const EdgeInsets.only(bottom: 2),
                           child: Text(
                             displayArea,
-                            style: TextStyle(fontSize: 12, color: Colors.grey[100]),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey[100],
+                            ),
                           ),
                         ),
                       Text(
-                        DateFormat('yyyy.MM.dd HH:mm').format(eventDate),
+                        eventDate != null
+                            ? DateFormat('yyyy.MM.dd HH:mm').format(eventDate)
+                            : '',
                         style: TextStyle(fontSize: 11, color: Colors.grey[90]),
                       ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          Icon(FluentIcons.people, size: 12, color: Colors.blue),
+                          Icon(
+                            FluentIcons.people,
+                            size: 12,
+                            color: Colors.blue,
+                          ),
                           const SizedBox(width: 4),
-                          Builder(builder: (_) {
-                            final totalCount = isFloorWide
-                                ? (_floorStudentCounts[floor] ?? 0)
-                                : (_roomStudentCounts[roomNumber] ?? 0);
-                            final isComplete = totalCount > 0 && attendeeCount >= totalCount;
-                            return Text(
-                              totalCount > 0
-                                  ? '$attendeeCount / $totalCount명 출석'
-                                  : '출석: $attendeeCount명',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isComplete ? Colors.green : null,
-                                fontWeight: isComplete ? FontWeight.bold : FontWeight.normal,
-                              ),
-                            );
-                          }),
+                          Builder(
+                            builder: (_) {
+                              final totalCount = isFloorWide
+                                  ? (_floorStudentCounts[floor] ?? 0)
+                                  : (_roomStudentCounts[roomNumber] ?? 0);
+                              final isComplete =
+                                  totalCount > 0 && attendeeCount >= totalCount;
+                              return Text(
+                                totalCount > 0
+                                    ? '$attendeeCount / $totalCount명 출석'
+                                    : '출석: $attendeeCount명',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isComplete ? Colors.green : null,
+                                  fontWeight: isComplete
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              );
+                            },
+                          ),
                           const Spacer(),
+                          // 상벌점 적용 버튼 (화재대피훈련·일반 인원점검 공통).
+                          // 스케줄이 종료된 이벤트에서만 적용할 수 있다.
+                          SizedBox(
+                            height: 36,
+                            child: Button(
+                              style: ButtonStyle(
+                                foregroundColor: WidgetStateProperty.all(
+                                  event['pointsApplied'] == true
+                                      ? Colors.grey
+                                      : Colors.red,
+                                ),
+                              ),
+                              child: const Text(
+                                '상벌점 적용',
+                                style: TextStyle(fontSize: 13),
+                              ),
+                              onPressed: isActive
+                                  ? null
+                                  : () => _manuallyApplyAttendancePoints(event),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
                           // 상태 토글 버튼
                           SizedBox(
                             height: 36,
                             child: Button(
-                              child: Text(isActive ? '종료' : '재개', style: const TextStyle(fontSize: 15)),
-                              onPressed: () => _toggleEventStatus(eventId, status),
+                              child: Text(
+                                isActive ? '종료' : '재개',
+                                style: const TextStyle(fontSize: 15),
+                              ),
+                              onPressed: () =>
+                                  _toggleEventStatus(eventId, status),
                             ),
                           ),
                           const SizedBox(width: 4),
@@ -809,7 +1025,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                           SizedBox(
                             height: 36,
                             child: Button(
-                              child: const Text('삭제', style: TextStyle(fontSize: 15)),
+                              child: const Text(
+                                '삭제',
+                                style: TextStyle(fontSize: 15),
+                              ),
                               onPressed: () => _deleteEvent(eventId),
                             ),
                           ),
@@ -831,7 +1050,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       if (_records.isEmpty) return const Center(child: Text('출석 기록이 없습니다'));
       return ListView.builder(
         itemCount: _records.length,
-        itemBuilder: (context, index) => _buildRecordCard(_records[index], index),
+        itemBuilder: (context, index) =>
+            _buildRecordCard(_records[index], index),
       );
     }
 
@@ -852,7 +1072,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       separatorBuilder: (context, i) => const Divider(),
       itemBuilder: (context, index) {
         if (index >= _roomStudents.length) {
-          final excelRow = _roomUnregisteredStudents[index - _roomStudents.length];
+          final excelRow =
+              _roomUnregisteredStudents[index - _roomStudents.length];
           return _buildUnregisteredStudentTile(excelRow);
         }
         final student = _roomStudents[index];
@@ -870,184 +1091,292 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
           orElse: () => {},
         );
         final checkedAt = (record['checkedInAt'] as Timestamp?)?.toDate();
-        final arrivalCheckedAt = (record['arrivalCheckedAt'] as Timestamp?)?.toDate();
+        final arrivalCheckedAt = (record['arrivalCheckedAt'] as Timestamp?)
+            ?.toDate();
         // 화재대피용: 1차(대피 시작)만 확인되고 아직 2차(대피 도착)가 안 된 상태
-        final hasStartedOnly = record.isNotEmpty && record['isComplete'] == false;
+        final hasStartedOnly =
+            record.isNotEmpty && record['isComplete'] == false;
 
         final adminStatus = _adminStatuses[uid];
         final floorStatus = _floorStatuses[uid];
-        final blockedColor = _blockedStatusColors[residentStatus] ?? const Color(0xFF9E9E9E);
-        final floorStatusColor = _floorStatusColors[floorStatus] ?? const Color(0xFF9E9E9E);
+        final remark = _remarks[uid];
+        final blockedColor =
+            _blockedStatusColors[residentStatus] ?? const Color(0xFF9E9E9E);
+        final floorStatusColor =
+            _floorStatusColors[floorStatus] ?? const Color(0xFF9E9E9E);
 
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           color: isBlocked ? blockedColor.withValues(alpha: 0.04) : null,
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(
-                isBlocked
-                    ? FluentIcons.blocked
-                    : isPresent
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Icon(
+                    isBlocked
+                        ? FluentIcons.blocked
+                        : isPresent
                         ? FluentIcons.check_mark
                         : FluentIcons.radio_bullet,
-                color: isBlocked
-                    ? blockedColor
-                    : isPresent
+                    color: isBlocked
+                        ? blockedColor
+                        : isPresent
                         ? const Color(0xFF4CAF50)
                         : const Color(0xFF9E9E9E),
-                size: 20,
-              ),
-              const SizedBox(width: 12),
-              SizedBox(
-                width: 130, // Expanded from 80 to fit name + seat number
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      seatNumber.isNotEmpty ? '$name (자리 $seatNumber)' : name,
-                      style: TextStyle(
-                        fontWeight: isPresent ? FontWeight.bold : FontWeight.normal,
-                        color: isBlocked
-                            ? blockedColor
-                            : isPresent
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 130, // Expanded from 80 to fit name + seat number
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          seatNumber.isNotEmpty
+                              ? '$name (자리 $seatNumber)'
+                              : name,
+                          style: TextStyle(
+                            fontWeight: isPresent
+                                ? FontWeight.bold
+                                : FontWeight.normal,
+                            color: isBlocked
+                                ? blockedColor
+                                : isPresent
                                 ? null
                                 : const Color(0xFF888888),
-                      ),
-                    ),
-                    if (roomNumber.isNotEmpty)
-                      Text('$roomNumber호', style: const TextStyle(fontSize: 11, color: Color(0xFF999999))),
-                    if (studentId.isNotEmpty)
-                      Text(studentId, style: const TextStyle(fontSize: 11, color: Color(0xFF999999))),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              if (isBlocked)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: blockedColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: blockedColor.withValues(alpha: 0.5)),
-                  ),
-                  child: Text(
-                    residentStatus,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: blockedColor,
-                    ),
-                  ),
-                )
-              else if (isPresent)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF4CAF50).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFF4CAF50).withValues(alpha: 0.5)),
-                      ),
-                      child: Text(
-                        isFireDrillEvent ? '도착' : '재실확인',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF4CAF50)),
-                      ),
-                    ),
-                    if (isFireDrillEvent) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        checkedAt != null
-                            ? '시작 ${DateFormat('HH:mm').format(checkedAt)}'
-                            : '시작 미확인',
-                        style: const TextStyle(color: Color(0xFF9E9E9E), fontSize: 12),
-                      ),
-                      const SizedBox(width: 6),
-                      if (arrivalCheckedAt != null)
-                        Text(
-                          '도착 ${DateFormat('HH:mm').format(arrivalCheckedAt)}',
-                          style: const TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold, fontSize: 13),
-                        ),
-                    ] else if (checkedAt != null) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        DateFormat('HH:mm').format(checkedAt),
-                        style: const TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ],
-                  ],
-                )
-              else if (hasStartedOnly)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
-                      ),
-                      child: Text(
-                        '시작',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange),
-                      ),
-                    ),
-                    if (checkedAt != null) ...[
-                      const SizedBox(width: 8),
-                      Text(
-                        DateFormat('HH:mm').format(checkedAt),
-                        style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13),
-                      ),
-                    ],
-                  ],
-                )
-              else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (floorStatus != null && floorStatus.isNotEmpty) ...[
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: floorStatusColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: floorStatusColor.withValues(alpha: 0.5)),
-                        ),
-                        child: Text(
-                          '층장: $floorStatus',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: floorStatusColor,
                           ),
                         ),
+                        if (roomNumber.isNotEmpty)
+                          Text(
+                            '$roomNumber호',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF999999),
+                            ),
+                          ),
+                        if (studentId.isNotEmpty)
+                          Text(
+                            studentId,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Color(0xFF999999),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  if (isBlocked)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
                       ),
-                      const SizedBox(width: 8),
-                    ],
-                    Button(
-                      onPressed: isEventClosed
-                          ? null
-                          : () => _saveAdminStatus(uid, adminStatus == '외박' ? null : '외박'),
-                      style: ButtonStyle(
-                        backgroundColor: WidgetStateProperty.all(
-                          adminStatus == '외박'
-                              ? const Color(0xFFFF9800).withValues(alpha: 0.15)
-                              : null,
+                      decoration: BoxDecoration(
+                        color: blockedColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: blockedColor.withValues(alpha: 0.5),
                         ),
                       ),
                       child: Text(
-                        adminStatus == '외박' ? '외박 신청 완료' : '외박',
+                        residentStatus,
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: adminStatus == '외박' ? const Color(0xFFFF9800) : null,
+                          color: blockedColor,
                         ),
                       ),
+                    )
+                  else if (isPresent)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (!isFireDrillEvent) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFF4CAF50,
+                              ).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: const Color(
+                                  0xFF4CAF50,
+                                ).withValues(alpha: 0.5),
+                              ),
+                            ),
+                            child: const Text(
+                              '재실확인',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF4CAF50),
+                              ),
+                            ),
+                          ),
+                        ],
+                        if (isFireDrillEvent) ...[
+                          Text(
+                            checkedAt != null
+                                ? '1차: ${DateFormat('HH:mm').format(checkedAt)}'
+                                : '1차 미확인',
+                            style: TextStyle(
+                              color: checkedAt != null
+                                  ? const Color(0xFF64B5F6)
+                                  : const Color(0xFFE65100),
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          if (arrivalCheckedAt != null)
+                            Text(
+                              '2차: ${DateFormat('HH:mm').format(arrivalCheckedAt)}',
+                              style: const TextStyle(
+                                color: Color(0xFF4CAF50),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                        ] else if (checkedAt != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            DateFormat('HH:mm').format(checkedAt),
+                            style: const TextStyle(
+                              color: Color(0xFF4CAF50),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ],
+                    )
+                  else if (hasStartedOnly)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          checkedAt != null
+                              ? '1차: ${DateFormat('HH:mm').format(checkedAt)}'
+                              : '1차 미확인',
+                          style: TextStyle(
+                            color: checkedAt != null
+                                ? const Color(0xFF64B5F6)
+                                : const Color(0xFFE65100),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        if (checkedAt == null && arrivalCheckedAt != null) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '2차: ${DateFormat('HH:mm').format(arrivalCheckedAt)}',
+                            style: TextStyle(
+                              color: Colors.orange,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ],
+                    )
+                  else
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (floorStatus != null && floorStatus.isNotEmpty) ...[
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: floorStatusColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(
+                                color: floorStatusColor.withValues(alpha: 0.5),
+                              ),
+                            ),
+                            child: Text(
+                              '층장: $floorStatus',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: floorStatusColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        Builder(
+                          builder: (context) {
+                            // 화재대피훈련은 '불참인정', 일반 인원점검은 '외박'으로 상태값을 구분한다.
+                            final targetStatus = isFireDrillEvent
+                                ? '불참인정'
+                                : '외박';
+                            final isActive = adminStatus == targetStatus;
+                            return Button(
+                              onPressed: isEventClosed
+                                  ? null
+                                  : () => _saveAdminStatus(
+                                      uid,
+                                      isActive ? null : targetStatus,
+                                    ),
+                              style: ButtonStyle(
+                                backgroundColor: WidgetStateProperty.all(
+                                  isActive
+                                      ? const Color(
+                                          0xFFFF9800,
+                                        ).withValues(alpha: 0.15)
+                                      : null,
+                                ),
+                              ),
+                              child: Text(
+                                isActive ? '$targetStatus 완료' : targetStatus,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: isActive
+                                      ? const Color(0xFFFF9800)
+                                      : null,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
                     ),
-                  ],
+                ],
+              ),
+              if (remark != null && remark.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4, left: 32),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        FluentIcons.comment,
+                        size: 12,
+                        color: Colors.grey[110],
+                      ),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          remark,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[110],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
             ],
           ),
@@ -1068,11 +1397,7 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          const Icon(
-            FluentIcons.contact,
-            color: Color(0xFF9E9E9E),
-            size: 20,
-          ),
+          const Icon(FluentIcons.contact, color: Color(0xFF9E9E9E), size: 20),
           const SizedBox(width: 12),
           SizedBox(
             width: 130,
@@ -1081,7 +1406,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
               children: [
                 Text(
                   seatNumber.isNotEmpty ? '$name (자리 $seatNumber)' : name,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                  ),
                 ),
                 if (roomNumber.isNotEmpty)
                   Text(
@@ -1142,23 +1470,26 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         children: [
           const Icon(FluentIcons.people, size: 16),
           const SizedBox(width: 8),
-          Builder(builder: (_) {
-            final roomNumber = (_selectedEvent!['roomNumber'] as String?) ?? '';
-            final isFloorWide = _selectedEvent!['isFloorWide'] == true;
-            final floor = (_selectedEvent!['floor'] as String?) ?? '';
-            final totalCount = isFloorWide
-                ? (_floorStudentCounts[floor] ?? 0)
-                : (_roomStudentCounts[roomNumber] ?? 0);
-            final label = totalCount > 0
-                ? '$title - 출석 기록 ($attendeeCount / $totalCount명)'
-                : '$title - 출석 기록 ($attendeeCount명)';
-            return Text(label, style: const TextStyle(fontWeight: FontWeight.bold));
-          }),
-          const Spacer(),
-          Button(
-            child: const Text('엑셀 출력'),
-            onPressed: _exportRecordsToExcel,
+          Builder(
+            builder: (_) {
+              final roomNumber =
+                  (_selectedEvent!['roomNumber'] as String?) ?? '';
+              final isFloorWide = _selectedEvent!['isFloorWide'] == true;
+              final floor = (_selectedEvent!['floor'] as String?) ?? '';
+              final totalCount = isFloorWide
+                  ? (_floorStudentCounts[floor] ?? 0)
+                  : (_roomStudentCounts[roomNumber] ?? 0);
+              final label = totalCount > 0
+                  ? '$title - 출석 기록 ($attendeeCount / $totalCount명)'
+                  : '$title - 출석 기록 ($attendeeCount명)';
+              return Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              );
+            },
           ),
+          const Spacer(),
+          Button(child: const Text('엑셀 출력'), onPressed: _exportRecordsToExcel),
         ],
       ),
     );
@@ -1167,7 +1498,6 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
   Future<void> _exportRecordsToExcel() async {
     if (_selectedEvent == null || !mounted) return;
     final eventId = _selectedEvent!['_id'] as String;
-    final dateStr = DateFormat('yyyyMMdd').format(DateTime.now());
 
     showDialog(
       context: context,
@@ -1182,37 +1512,117 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       final isFireDrillEvent = _selectedEvent?['isFireDrill'] == true;
       // 화재대피훈련은 시작(checkedInAt)과 도착(arrivalCheckedAt)을 모두 찍어야 참석으로 인정한다.
       // 둘 중 하나만 찍힌 경우(isComplete == false)는 불참으로 취급한다.
-      final attendedIds = _records
-          .where((r) =>
-              r['eventId'] == eventId &&
-              (!isFireDrillEvent || r['isComplete'] != false))
+      final eventRecords = _records
+          .where((r) => r['eventId'] == eventId)
+          .toList();
+      // uid -> 출석 기록 (한 이벤트에 학생당 하나씩만 생성된다).
+      final recordByUid = <String, Map<String, dynamic>>{};
+      for (final r in eventRecords) {
+        final uid = r['userId'] as String? ?? '';
+        if (uid.isNotEmpty) recordByUid[uid] = r;
+      }
+      final attendedIds = eventRecords
+          .where((r) => !isFireDrillEvent || r['isComplete'] != false)
           .map((r) => r['userId'] as String? ?? '')
           .where((id) => id.isNotEmpty)
           .toSet();
 
       final excel = Excel.createExcel();
       final sheet = excel['출석부과내역'];
-      final headers = ['학번', '성명', '부과일자', '상벌구분', '상벌점내용', '상점', '비고'];
+      final headers = isFireDrillEvent
+          ? ['거주건물', '호실', '학번', '성명', '상벌구분', '상벌점내용', '상점', '1차 시각', '2차 시각', '비고']
+          : ['거주건물', '호실', '학번', '성명', '상벌구분', '상벌점내용', '상점', '비고'];
       for (int c = 0; c < headers.length; c++) {
-        sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0)).value =
-            TextCellValue(headers[c]);
+        sheet
+            .cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: 0))
+            .value = TextCellValue(
+          headers[c],
+        );
       }
 
+      final timeFormat = DateFormat('HH:mm');
       int rowIdx = 1;
-      void writeRow(String studentId, String name, bool attended) {
-        final code = attended ? kPointCodeByCode['0006'] : kPointCodeByCode['0134'];
+      void writeRow(String uid, String studentId, String name, bool attended,
+          String dormBuilding, String roomNumber) {
+        // 관리자가 지정한 열외 상태(화재대피훈련은 '불참인정', 일반 인원점검은 '외박')인
+        // 학생은 실제 출석 여부와 무관하게 항상 최우선으로 적용되어, 상벌점 없이
+        // 비고에만 남긴다.
+        final exemptStatus = isFireDrillEvent ? '불참인정' : '외박';
+        final isExemptAbsence = _adminStatuses[uid] == exemptStatus;
+
+        Map<String, dynamic>? code;
+        String remark = '';
+        if (isExemptAbsence) {
+          code = null;
+          remark = isFireDrillEvent ? '불참인정완료' : '외박신청완료';
+        } else if (attended) {
+          if (isFireDrillEvent) {
+            // 화재대피훈련 1차·2차 모두 완료: 0006(상점 3점)
+            code = kPointCodeByCode['0006'];
+            remark = '재실';
+          } else {
+            // 일반 출석(화재대피훈련 아님) 재실확인: 상점 없이 비고에만 남긴다.
+            code = null;
+            remark = '재실확인';
+          }
+        } else if (isFireDrillEvent) {
+          // 화재대피훈련 미참석: 1차·2차 중 어느 단계에서 빠졌는지 구분해 비고에 남긴다.
+          final hasFirst =
+              (recordByUid[uid]?['checkedInAt'] as Timestamp?) != null;
+          code = kPointCodeByCode['0134'];
+          remark = hasFirst ? '2차 불참' : '1차 불참';
+        } else if (_floorStatuses[uid] == '외박미신청') {
+          // 일반 출석(화재대피훈련 아님)에서 미출석 + 외박 미신청 상태: 0139(벌점 4점)
+          code = kPointCodeByCode['0139'];
+          remark = '외박 미신청';
+        } else if (_floorStatuses[uid] == '외박미수정') {
+          // 미출석 + 외박 미수정 상태: 0140(벌점 1점, 미수정 인원확인)
+          code = kPointCodeByCode['0140'];
+          remark = '외박 미수정';
+        } else if (_floorStatuses[uid] == '바롬인성교육관' ||
+            _floorStatuses[uid] == '무단퇴사') {
+          // 별도 상벌점 코드가 없는 상태는 상벌점 없이 비고에 값만 남긴다.
+          code = null;
+          remark = _floorStatuses[uid]!;
+        } else {
+          // 층장이 상태를 선택하지 않았고 QR 체크도 없는 경우: 확인이 필요한 미출석.
+          code = null;
+          remark = '확인필요';
+        }
+
         final values = [
+          dormBuilding,
+          roomNumber,
           studentId,
           name,
-          dateStr,
           (code?['division'] as String?) ?? '',
           (code?['code'] as String?) ?? '',
           code != null ? '${code['points']}' : '',
-          '',
+          // 불참인정 행은 상벌점과 무관하게 열외 처리되므로 체크인 시각도 표시하지 않는다.
+          if (isFireDrillEvent) ...[
+            () {
+              if (isExemptAbsence) return '';
+              final t = (recordByUid[uid]?['checkedInAt'] as Timestamp?)
+                  ?.toDate();
+              return t != null ? timeFormat.format(t) : '';
+            }(),
+            () {
+              if (isExemptAbsence) return '';
+              final t = (recordByUid[uid]?['arrivalCheckedAt'] as Timestamp?)
+                  ?.toDate();
+              return t != null ? timeFormat.format(t) : '';
+            }(),
+          ],
+          remark,
         ];
         for (int c = 0; c < values.length; c++) {
-          sheet.cell(CellIndex.indexByColumnRow(columnIndex: c, rowIndex: rowIdx)).value =
-              TextCellValue(values[c]);
+          sheet
+              .cell(
+                CellIndex.indexByColumnRow(columnIndex: c, rowIndex: rowIdx),
+              )
+              .value = TextCellValue(
+            values[c],
+          );
         }
         rowIdx++;
       }
@@ -1222,7 +1632,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         final uid = s['id'] as String? ?? '';
         final name = (s['name'] as String?) ?? '';
         final studentId = (s['studentId'] as String?) ?? '';
-        writeRow(studentId, name, attendedIds.contains(uid));
+        final dormBuilding = (s['dormBuilding'] as String?) ?? '';
+        final roomNumber = (s['roomNumber'] as String?) ?? '';
+        writeRow(uid, studentId, name, attendedIds.contains(uid), dormBuilding,
+            roomNumber);
       }
 
       if (excel.sheets.containsKey('Sheet1')) excel.delete('Sheet1');
@@ -1235,7 +1648,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
 
       final savePath = await FilePicker.platform.saveFile(
         dialogTitle: '출석 부과 내역 저장',
-        fileName: '출석부과내역_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.xlsx',
+        fileName:
+            '출석부과내역_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.xlsx',
         type: FileType.custom,
         allowedExtensions: ['xlsx'],
       );
@@ -1255,10 +1669,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       Navigator.pop(context);
       await displayInfoBar(
         context,
-        builder: (c, close) => InfoBar(
-          title: Text('오류: $e'),
-          severity: InfoBarSeverity.error,
-        ),
+        builder: (c, close) =>
+            InfoBar(title: Text('오류: $e'), severity: InfoBarSeverity.error),
       );
     }
   }
@@ -1268,7 +1680,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
     final userName = (record['userName'] ?? '') as String;
     final studentId = (record['studentId'] ?? '') as String;
     final roomNumber = (record['roomNumber'] ?? '') as String;
-    final dormBuilding = ((record['dormBuilding'] as String?)?.isNotEmpty == true
+    final dormBuilding =
+        ((record['dormBuilding'] as String?)?.isNotEmpty == true
         ? record['dormBuilding'] as String
         : (record['building'] as String? ?? ''));
     final checkedInAt = (record['checkedInAt'] as Timestamp?)?.toDate();
@@ -1286,7 +1699,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         children: [
           SizedBox(
             width: 30,
-            child: Text('${index + 1}', style: TextStyle(fontSize: 13, color: Colors.grey[100])),
+            child: Text(
+              '${index + 1}',
+              style: TextStyle(fontSize: 13, color: Colors.grey[100]),
+            ),
           ),
           SizedBox(
             width: 130, // Expanded from 80 to fit name + seat number
@@ -1296,7 +1712,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                     builder: (context, snapshot) {
                       String displaySeat = '';
                       if (snapshot.hasData && snapshot.data!.exists) {
-                        final udata = snapshot.data!.data() as Map<String, dynamic>?;
+                        final udata =
+                            snapshot.data!.data() as Map<String, dynamic>?;
                         final seat = udata?['seatNumber'] as String? ?? '';
                         if (seat.isNotEmpty) {
                           displaySeat = ' (자리 $seat)';
@@ -1308,7 +1725,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
                       );
                     },
                   )
-                : Text(userName, style: const TextStyle(fontWeight: FontWeight.w600)),
+                : Text(
+                    userName,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
           ),
           SizedBox(
             width: 100,
@@ -1317,7 +1737,10 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
           SizedBox(
             width: 140,
             child: Text(
-              [if (dormBuilding.isNotEmpty) dormBuilding, if (roomNumber.isNotEmpty) '$roomNumber호'].join(' '),
+              [
+                if (dormBuilding.isNotEmpty) dormBuilding,
+                if (roomNumber.isNotEmpty) '$roomNumber호',
+              ].join(' '),
               style: const TextStyle(fontSize: 13),
             ),
           ),
@@ -1340,38 +1763,64 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
   }
 
   /// 구역(floor) 전체의 재실 학생을 조회한다. 퇴사 등 재실중이 아닌 학생은 제외한다.
-  Future<({List<Map<String, dynamic>> students, List<String> occupiedRooms, List<String> allRoomNumbers})> _loadStudentsForFloor(
-    String floor,
-  ) async {
+  Future<
+    ({
+      List<Map<String, dynamic>> students,
+      List<String> occupiedRooms,
+      List<String> allRoomNumbers,
+    })
+  >
+  _loadStudentsForFloor(String floor) async {
     final roomMap = await _loadRoomsForFloor(floor);
-    final occupiedRooms = roomMap.entries.where((e) => e.value).map((e) => e.key).toList();
+    final occupiedRooms = roomMap.entries
+        .where((e) => e.value)
+        .map((e) => e.key)
+        .toList();
     final allRoomNumbers = roomMap.keys.toList();
     final dormBuilding = _dormBuildingFromFloor(floor);
     final students = <Map<String, dynamic>>[];
     if (occupiedRooms.isNotEmpty && dormBuilding != null) {
       // whereIn은 최대 30개까지만 지원하므로 청크로 나눠 조회한다.
       for (var i = 0; i < occupiedRooms.length; i += 30) {
-        final chunk = occupiedRooms.sublist(i, (i + 30).clamp(0, occupiedRooms.length));
+        final chunk = occupiedRooms.sublist(
+          i,
+          (i + 30).clamp(0, occupiedRooms.length),
+        );
         final studentsSnap = await _firestore
             .collection('users')
             .where('dormBuilding', isEqualTo: dormBuilding)
             .where('roomNumber', whereIn: chunk)
             .get();
-        students.addAll(studentsSnap.docs.where((doc) {
-          final data = doc.data();
-          if ((data['role'] as String?) != 'student') return false;
-          final residentStatus = (data['residentStatus'] as String?) ?? '재실중';
-          return !_blockedStatuses.contains(residentStatus);
-        }).map((doc) => {'id': doc.id, ...doc.data()}));
+        students.addAll(
+          studentsSnap.docs
+              .where((doc) {
+                final data = doc.data();
+                if ((data['role'] as String?) != 'student') return false;
+                final residentStatus =
+                    (data['residentStatus'] as String?) ?? '재실중';
+                return !_blockedStatuses.contains(residentStatus);
+              })
+              .map((doc) => {'id': doc.id, ...doc.data()}),
+        );
       }
     }
     students.sort((a, b) {
-      final roomA = int.tryParse((a['roomNumber'] as String?) ?? '') ?? 0;
-      final roomB = int.tryParse((b['roomNumber'] as String?) ?? '') ?? 0;
-      if (roomA != roomB) return roomA.compareTo(roomB);
+      // 바롬 '1001-A' 형식도 자연스럽게 정렬되도록 '-' 앞 숫자를 우선 비교한다.
+      final rawA = (a['roomNumber'] as String?) ?? '';
+      final rawB = (b['roomNumber'] as String?) ?? '';
+      final roomA = int.tryParse(rawA.split('-').first);
+      final roomB = int.tryParse(rawB.split('-').first);
+      if (roomA != null && roomB != null && roomA != roomB) {
+        return roomA.compareTo(roomB);
+      }
+      if (rawA != rawB) return rawA.compareTo(rawB);
       return (a['name'] as String? ?? '').compareTo(b['name'] as String? ?? '');
     });
-    return (students: students, occupiedRooms: occupiedRooms, allRoomNumbers: allRoomNumbers);
+    return (
+      students: students,
+      occupiedRooms: occupiedRooms,
+      allRoomNumbers: allRoomNumbers,
+    );
   }
 
   // ──────────── 관리구역 → 호실 목록 로드 ────────────
@@ -1381,13 +1830,15 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
     final buildingMatch = RegExp(r'([AB])동').firstMatch(floor);
     final floorMatch = RegExp(r'(\d+)층').firstMatch(floor);
     final building = buildingMatch?.group(1);
-    final floorNum = floorMatch != null ? int.tryParse(floorMatch.group(1)!) : null;
+    final floorNum = floorMatch != null
+        ? int.tryParse(floorMatch.group(1)!)
+        : null;
 
     if (floorNum == null) return {};
 
     List<String> candidateRooms = [];
 
-    // '(겨울방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
+    // '(방학)'은 같은 건물을 학기중/방학으로 나눈 개념이라 호실 체계가 같다.
     if (dormBuilding.startsWith('샬롬하우스')) {
       // A동: floor×100 + 01~20 / B동: floor×100 + 21~40
       // 단, A동 1층은 107~109호만 존재하는 예외 구역
@@ -1423,7 +1874,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       final residentStatus = (data['residentStatus'] as String?) ?? '재실중';
       if (residentStatus != '재실중') continue;
       if (dormBuilding == '바롬인성교육관') {
-        final n = int.tryParse(r);
+        // 바롬 호실은 '1001-A' 형식 → '-' 앞 숫자로 층 판정
+        final n = int.tryParse(r.split('-').first);
         if (n != null && n ~/ 100 == floorNum) occupiedRooms.add(r);
       } else if (candidateRooms.isNotEmpty) {
         // 후보 호실이 있으면 해당 동/층에 속한 호실만 담는다.
@@ -1435,8 +1887,7 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
 
     if (dormBuilding == '바롬인성교육관') {
       // 물리적 전체 호실 범위가 없으므로 재실 이력이 있는 호실만 후보로 사용
-      candidateRooms = occupiedRooms.toList()
-        ..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+      candidateRooms = occupiedRooms.toList()..sort((a, b) => a.compareTo(b));
     }
 
     return {for (final r in candidateRooms) r: occupiedRooms.contains(r)};
@@ -1451,7 +1902,11 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         loadRoomsForFloor: _loadRoomsForFloor,
         onCreateFloorWide: (title, floor, isFireDrill) async {
           Navigator.pop(dialogContext);
-          await _createFloorWideEvent(title, floor: floor, isFireDrill: isFireDrill);
+          await _createFloorWideEvent(
+            title,
+            floor: floor,
+            isFireDrill: isFireDrill,
+          );
         },
       ),
     );
@@ -1460,7 +1915,11 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
   /// 구역(floor) 전체 재실 학생을 대상으로 하는 통합 이벤트 1개를 생성한다.
   /// (호실별로 여러 이벤트를 만드는 기존 방식과 달리 roomNumber를 두지 않는다.)
   /// isFireDrill=true(화재대피용)인 경우에만 종료 시 상벌점이 자동 부여된다.
-  Future<void> _createFloorWideEvent(String title, {required String floor, bool isFireDrill = false}) async {
+  Future<void> _createFloorWideEvent(
+    String title, {
+    required String floor,
+    bool isFireDrill = false,
+  }) async {
     try {
       await _firestore.collection('attendance_events').add({
         'title': title,
@@ -1476,9 +1935,16 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       _loadEvents();
     } catch (e) {
       if (mounted) {
-        await displayInfoBar(context, builder: (context, close) {
-          return InfoBar(title: const Text('오류'), content: Text('이벤트 생성 실패: $e'), severity: InfoBarSeverity.error);
-        });
+        await displayInfoBar(
+          context,
+          builder: (context, close) {
+            return InfoBar(
+              title: const Text('오류'),
+              content: Text('이벤트 생성 실패: $e'),
+              severity: InfoBarSeverity.error,
+            );
+          },
+        );
       }
     }
   }
@@ -1486,7 +1952,9 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
   Future<void> _toggleEventStatus(String eventId, String currentStatus) async {
     final newStatus = currentStatus == 'active' ? 'closed' : 'active';
     // ignore: avoid_print
-    print('[토글] eventId=$eventId currentStatus=$currentStatus newStatus=$newStatus');
+    print(
+      '[토글] eventId=$eventId currentStatus=$currentStatus newStatus=$newStatus',
+    );
     try {
       await _firestore.collection('attendance_events').doc(eventId).update({
         'status': newStatus,
@@ -1496,35 +1964,55 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         // ignore: avoid_print
         print('[토글] _archiveManualStatuses 호출 시작');
         await _archiveManualStatuses(eventId);
-        await _applyAttendancePoints(eventId);
+        // 상벌점은 더 이상 종료 시 자동 적용하지 않는다. 카드의 "상벌점 적용"
+        // 버튼(_manuallyApplyAttendancePoints)으로 수동 적용한다.
       }
-      _loadEvents();
+      _loadEvents(showLoading: false);
     } catch (e) {
       if (mounted) {
-        await displayInfoBar(context, builder: (context, close) {
-          return InfoBar(title: const Text('오류'), content: Text('상태 변경 실패: $e'), severity: InfoBarSeverity.error);
-        });
+        await displayInfoBar(
+          context,
+          builder: (context, close) {
+            return InfoBar(
+              title: const Text('오류'),
+              content: Text('상태 변경 실패: $e'),
+              severity: InfoBarSeverity.error,
+            );
+          },
+        );
       }
     }
   }
 
-  /// 이벤트 종료 시 관리자 상태(외박)와 층장 상태(부재/외박미수정)를 출석 이력에 기록으로 남긴다.
+  /// 이벤트 종료 시 관리자 상태(외박)와 층장 상태(부재/외박미수정)를 출석 이력에
+  /// 기록으로 남긴다. 상태도 지정되지 않고 QR 체크도 없는(이력 화면에 '기록 없음'으로
+  /// 뜨던) 학생은 '불참'으로 기록을 남긴다.
   Future<void> _archiveManualStatuses(String eventId) async {
     try {
-      final eventDoc = await _firestore.collection('attendance_events').doc(eventId).get();
+      final eventDoc = await _firestore
+          .collection('attendance_events')
+          .doc(eventId)
+          .get();
       final eventData = eventDoc.data();
       // ignore: avoid_print
-      print('[아카이브] eventId=$eventId eventData keys=${eventData?.keys.toList()}');
+      print(
+        '[아카이브] eventId=$eventId eventData keys=${eventData?.keys.toList()}',
+      );
       if (eventData == null) return;
-      final adminStatuses = (eventData['adminStatuses'] as Map<String, dynamic>?) ?? {};
-      final floorStatuses = (eventData['floorStatuses'] as Map<String, dynamic>?) ?? {};
-      final adminStatusSetBy = (eventData['adminStatusSetBy'] as Map<String, dynamic>?) ?? {};
-      final adminStatusSetByName = (eventData['adminStatusSetByName'] as Map<String, dynamic>?) ?? {};
-      final floorStatusSetBy = (eventData['floorStatusSetBy'] as Map<String, dynamic>?) ?? {};
-      final floorStatusSetByName = (eventData['floorStatusSetByName'] as Map<String, dynamic>?) ?? {};
+      final adminStatuses =
+          (eventData['adminStatuses'] as Map<String, dynamic>?) ?? {};
+      final floorStatuses =
+          (eventData['floorStatuses'] as Map<String, dynamic>?) ?? {};
+      final adminStatusSetBy =
+          (eventData['adminStatusSetBy'] as Map<String, dynamic>?) ?? {};
+      final adminStatusSetByName =
+          (eventData['adminStatusSetByName'] as Map<String, dynamic>?) ?? {};
+      final floorStatusSetBy =
+          (eventData['floorStatusSetBy'] as Map<String, dynamic>?) ?? {};
+      final floorStatusSetByName =
+          (eventData['floorStatusSetByName'] as Map<String, dynamic>?) ?? {};
       // ignore: avoid_print
       print('[아카이브] adminStatuses=$adminStatuses floorStatuses=$floorStatuses');
-      if (adminStatuses.isEmpty && floorStatuses.isEmpty) return;
       final eventTitle = (eventData['title'] as String?) ?? '출석체크';
 
       // uid -> {'admin': status?, 'floor': status?}
@@ -1535,6 +2023,42 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       floorStatuses.forEach((uid, st) {
         combined.putIfAbsent(uid, () => {})['floor'] = st as String?;
       });
+
+      // 대상 학생 전원을 로드해, QR 체크도 안 하고 상태도 지정되지 않은 학생을
+      // '불참'으로 기록한다(이력 화면에서 '기록 없음'으로 보이던 학생들).
+      final roomNumber = eventData['roomNumber'] as String?;
+      final isFloorWide = eventData['isFloorWide'] == true;
+      final floor = eventData['floor'] as String?;
+      List<Map<String, dynamic>> targetStudents = [];
+      if (isFloorWide && floor != null && floor.isNotEmpty) {
+        final result = await _loadStudentsForFloor(floor);
+        targetStudents = result.students;
+      } else if (roomNumber != null && roomNumber.isNotEmpty) {
+        final studentsSnap = await _firestore
+            .collection('users')
+            .where('roomNumber', isEqualTo: roomNumber)
+            .get();
+        targetStudents = studentsSnap.docs
+            .where((doc) => (doc.data()['role'] as String?) == 'student')
+            .map((doc) => {'id': doc.id, ...doc.data()})
+            .toList();
+      }
+
+      final recordsSnap = await _firestore
+          .collection('attendance_records')
+          .where('eventId', isEqualTo: eventId)
+          .get();
+      final checkedUids = recordsSnap.docs
+          .map((d) => d.data()['userId'] as String? ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
+      for (final s in targetStudents) {
+        final uid = s['id'] as String;
+        if (checkedUids.contains(uid)) continue;
+        if (combined.containsKey(uid)) continue;
+        combined[uid] = {'admin': null, 'floor': '불참'};
+      }
 
       final batch = _firestore.batch();
       for (final entry in combined.entries) {
@@ -1561,12 +2085,18 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
           'studentId': userData['studentId'] ?? '',
           'roomNumber': userData['roomNumber'] ?? '',
           'dormBuilding': userData['dormBuilding'] ?? '',
-          if (adminStatus != null && adminStatus.isNotEmpty) 'adminStatus': adminStatus,
-          if (adminStatusSetBy[uid] != null) 'adminStatusSetBy': adminStatusSetBy[uid],
-          if (adminStatusSetByName[uid] != null) 'adminStatusSetByName': adminStatusSetByName[uid],
-          if (floorStatus != null && floorStatus.isNotEmpty) 'floorStatus': floorStatus,
-          if (floorStatusSetBy[uid] != null) 'floorStatusSetBy': floorStatusSetBy[uid],
-          if (floorStatusSetByName[uid] != null) 'floorStatusSetByName': floorStatusSetByName[uid],
+          if (adminStatus != null && adminStatus.isNotEmpty)
+            'adminStatus': adminStatus,
+          if (adminStatusSetBy[uid] != null)
+            'adminStatusSetBy': adminStatusSetBy[uid],
+          if (adminStatusSetByName[uid] != null)
+            'adminStatusSetByName': adminStatusSetByName[uid],
+          if (floorStatus != null && floorStatus.isNotEmpty)
+            'floorStatus': floorStatus,
+          if (floorStatusSetBy[uid] != null)
+            'floorStatusSetBy': floorStatusSetBy[uid],
+          if (floorStatusSetByName[uid] != null)
+            'floorStatusSetByName': floorStatusSetByName[uid],
           'recordType': 'status',
           'checkedInAt': Timestamp.now(),
         });
@@ -1582,85 +2112,266 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
     }
   }
 
-  /// 이벤트 종료 시 재실 학생 전체에게 출석 여부에 따라 상벌점을 자동 적용한다.
-  /// 출석=0006(상점), 미출석=0134(벌점). 이벤트당 1회만 적용되도록 pointsApplied 플래그로 막는다.
-  /// 구역 전체 통합 생성 중 화재대피용(isFireDrill) 이벤트에만 적용하고, 그 외(구역별 생성 등)는 상벌점을 부여하지 않는다.
-  Future<void> _applyAttendancePoints(String eventId) async {
+  /// 카드의 "상벌점 적용" 버튼을 눌렀을 때 재실 학생 전체에게 출석 여부에
+  /// 따라 상벌점을 적용한다. 화재대피훈련과 일반 인원점검 각각 규칙이 달라
+  /// [_applyFireDrillPoints]/[_applyGeneralAttendancePoints]로 분기한다.
+  /// 이벤트당 1회만 적용되도록 pointsApplied 플래그로 막는다.
+  /// [force]가 true면 이미 적용된(pointsApplied) 이벤트에도 다시 적용한다(카드의 "상벌점 적용" 버튼용).
+  Future<void> _applyAttendancePoints(String eventId, {bool force = false}) async {
     try {
-      final eventDoc = await _firestore.collection('attendance_events').doc(eventId).get();
+      final eventDoc = await _firestore
+          .collection('attendance_events')
+          .doc(eventId)
+          .get();
       final eventData = eventDoc.data();
       if (eventData == null) return;
-      if (eventData['pointsApplied'] == true) return;
+      if (eventData['pointsApplied'] == true && !force) return;
 
       final isFireDrill = eventData['isFireDrill'] == true;
-      if (!isFireDrill) return;
-
-      final floor = eventData['floor'] as String?;
-      final eventTitle = (eventData['title'] as String?) ?? '인원점검';
-
-      if (floor == null || floor.isEmpty) return;
-      final result = await _loadStudentsForFloor(floor);
-      final students = result.students;
-      if (students.isEmpty) return;
-
-      // 외박신청완료(관리자가 '외박' 상태로 지정) 학생은 상점·벌점 모두 부여하지 않는다.
-      final adminStatuses = (eventData['adminStatuses'] as Map<String, dynamic>?) ?? {};
-      final exemptUids = adminStatuses.entries
-          .where((e) => e.value == '외박')
-          .map((e) => e.key)
-          .toSet();
-
-      final recordsSnap = await _firestore
-          .collection('attendance_records')
-          .where('eventId', isEqualTo: eventId)
-          .get();
-      // 화재대피용 상점은 시작(checkedInAt)과 도착(arrivalCheckedAt)이 모두 기록된 경우에만 부여한다.
-      final attendedIds = recordsSnap.docs
-          .where((d) {
-            final data = d.data();
-            if (data['recordType'] == 'status') return false;
-            return data['checkedInAt'] != null && data['arrivalCheckedAt'] != null;
-          })
-          .map((d) => d.data()['userId'] as String? ?? '')
-          .where((id) => id.isNotEmpty)
-          .toSet();
-
-      final rewardCode = kPointCodeByCode['0006'];
-      final penaltyCode = kPointCodeByCode['0134'];
-      if (rewardCode == null || penaltyCode == null) return;
-
-      final batch = _firestore.batch();
-      for (final s in students) {
-        final uid = s['id'] as String;
-        if (exemptUids.contains(uid)) continue;
-        final attended = attendedIds.contains(uid);
-        final code = attended ? rewardCode : penaltyCode;
-        final type = code['type'] as String;
-        final points = code['points'] as int;
-        final reason = '$eventTitle - ${code['name']} (${code['code']})';
-
-        final historyRef = _firestore.collection('users').doc(uid).collection('point_history').doc();
-        batch.set(historyRef, {
-          'userId': uid,
-          'type': type,
-          'points': points,
-          'reason': reason,
-          'createdAt': Timestamp.now(),
-        });
-        final userRef = _firestore.collection('users').doc(uid);
-        batch.update(userRef, {
-          'points': FieldValue.increment(type == 'reward' ? points : -points),
-        });
+      if (isFireDrill) {
+        await _applyFireDrillPoints(eventId, eventData);
+      } else {
+        await _applyGeneralAttendancePoints(eventId, eventData);
       }
-      batch.set(
-        _firestore.collection('attendance_events').doc(eventId),
-        {'pointsApplied': true},
-        SetOptions(merge: true),
-      );
-      await batch.commit();
     } catch (e) {
       // ignore: avoid_print
       print('[상벌점 자동적용] 에러: $e');
+    }
+  }
+
+  /// 화재대피훈련: 구역 전체 재실 학생에게 출석=0006(상점), 미출석=0134(벌점).
+  /// 1차(checkedInAt)와 2차(arrivalCheckedAt)가 모두 기록된 경우에만 출석으로 본다.
+  Future<void> _applyFireDrillPoints(
+    String eventId,
+    Map<String, dynamic> eventData,
+  ) async {
+    final floor = eventData['floor'] as String?;
+    final eventTitle = (eventData['title'] as String?) ?? '인원점검';
+
+    if (floor == null || floor.isEmpty) return;
+    final result = await _loadStudentsForFloor(floor);
+    final students = result.students;
+    if (students.isEmpty) return;
+
+    // 불참인정(관리자가 '불참인정' 상태로 지정) 학생은 상점·벌점 모두 부여하지 않는다.
+    final adminStatuses =
+        (eventData['adminStatuses'] as Map<String, dynamic>?) ?? {};
+    final exemptUids = adminStatuses.entries
+        .where((e) => e.value == '불참인정')
+        .map((e) => e.key)
+        .toSet();
+
+    final recordsSnap = await _firestore
+        .collection('attendance_records')
+        .where('eventId', isEqualTo: eventId)
+        .get();
+    // 화재대피용 상점은 시작(checkedInAt)과 도착(arrivalCheckedAt)이 모두 기록된 경우에만 부여한다.
+    final attendedIds = recordsSnap.docs
+        .where((d) {
+          final data = d.data();
+          if (data['recordType'] == 'status') return false;
+          return data['checkedInAt'] != null &&
+              data['arrivalCheckedAt'] != null;
+        })
+        .map((d) => d.data()['userId'] as String? ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    final rewardCode = kPointCodeByCode['0006'];
+    final penaltyCode = kPointCodeByCode['0134'];
+    if (rewardCode == null || penaltyCode == null) return;
+
+    final batch = _firestore.batch();
+    for (final s in students) {
+      final uid = s['id'] as String;
+      if (exemptUids.contains(uid)) continue;
+      final attended = attendedIds.contains(uid);
+      final code = attended ? rewardCode : penaltyCode;
+      final type = code['type'] as String;
+      final points = code['points'] as int;
+      final reason = '$eventTitle - ${code['name']} (${code['code']})';
+
+      final historyRef = _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('point_history')
+          .doc();
+      batch.set(historyRef, {
+        'userId': uid,
+        'type': type,
+        'points': points,
+        'reason': reason,
+        'createdAt': Timestamp.now(),
+      });
+      final userRef = _firestore.collection('users').doc(uid);
+      batch.update(userRef, {
+        'points': FieldValue.increment(type == 'reward' ? points : -points),
+      });
+    }
+    batch.set(
+      _firestore.collection('attendance_events').doc(eventId),
+      {'pointsApplied': true},
+      SetOptions(merge: true),
+    );
+    await batch.commit();
+  }
+
+  /// 일반 인원점검(화재대피훈련 아님): 엑셀 출력과 동일한 규칙으로 상벌점을 부여한다.
+  /// - 재실확인(출석): 상점 없음
+  /// - 외박(관리자 지정): 상벌점 없음(열외)
+  /// - 외박미신청(층장 지정): 0139(벌점 4점)
+  /// - 외박미수정(층장 지정): 0140(벌점 1점)
+  /// - 바롬인성교육관/무단퇴사(층장 지정): 상벌점 없음
+  /// - 그 외 미출석(상태 미지정): 상벌점 없음('확인필요'로 남기고 열외)
+  Future<void> _applyGeneralAttendancePoints(
+    String eventId,
+    Map<String, dynamic> eventData,
+  ) async {
+    final eventTitle = (eventData['title'] as String?) ?? '인원점검';
+    final roomNumber = eventData['roomNumber'] as String?;
+    final isFloorWide = eventData['isFloorWide'] == true;
+    final floor = eventData['floor'] as String?;
+
+    List<Map<String, dynamic>> students = [];
+    if (isFloorWide && floor != null && floor.isNotEmpty) {
+      final result = await _loadStudentsForFloor(floor);
+      students = result.students;
+    } else if (roomNumber != null && roomNumber.isNotEmpty) {
+      final studentsSnap = await _firestore
+          .collection('users')
+          .where('roomNumber', isEqualTo: roomNumber)
+          .get();
+      students = studentsSnap.docs
+          .where((doc) => (doc.data()['role'] as String?) == 'student')
+          .map((doc) => {'id': doc.id, ...doc.data()})
+          .toList();
+    }
+    if (students.isEmpty) return;
+
+    final adminStatuses =
+        (eventData['adminStatuses'] as Map<String, dynamic>?) ?? {};
+    final floorStatuses =
+        (eventData['floorStatuses'] as Map<String, dynamic>?) ?? {};
+
+    final recordsSnap = await _firestore
+        .collection('attendance_records')
+        .where('eventId', isEqualTo: eventId)
+        .get();
+    final attendedIds = recordsSnap.docs
+        .where((d) => d.data()['recordType'] != 'status')
+        .map((d) => d.data()['userId'] as String? ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
+
+    final penaltyCode0139 = kPointCodeByCode['0139'];
+    final penaltyCode0140 = kPointCodeByCode['0140'];
+
+    final batch = _firestore.batch();
+    for (final s in students) {
+      final uid = s['id'] as String;
+      final isExemptAbsence = adminStatuses[uid] == '외박';
+      if (isExemptAbsence) continue;
+      if (attendedIds.contains(uid)) continue;
+
+      final floorStatus = floorStatuses[uid] as String?;
+      Map<String, dynamic>? code;
+      if (floorStatus == '외박미신청') {
+        code = penaltyCode0139;
+      } else if (floorStatus == '외박미수정') {
+        code = penaltyCode0140;
+      } else {
+        // 바롬인성교육관/무단퇴사/상태 미지정('확인필요')은 상벌점을 부여하지 않는다.
+        continue;
+      }
+      if (code == null) continue;
+
+      final type = code['type'] as String;
+      final points = code['points'] as int;
+      final reason = '$eventTitle - ${code['name']} (${code['code']})';
+
+      final historyRef = _firestore
+          .collection('users')
+          .doc(uid)
+          .collection('point_history')
+          .doc();
+      batch.set(historyRef, {
+        'userId': uid,
+        'type': type,
+        'points': points,
+        'reason': reason,
+        'createdAt': Timestamp.now(),
+      });
+      final userRef = _firestore.collection('users').doc(uid);
+      batch.update(userRef, {
+        'points': FieldValue.increment(type == 'reward' ? points : -points),
+      });
+    }
+    batch.set(
+      _firestore.collection('attendance_events').doc(eventId),
+      {'pointsApplied': true},
+      SetOptions(merge: true),
+    );
+    await batch.commit();
+  }
+
+  /// 카드의 "상벌점 적용" 버튼에서 호출. 이미 적용된 이벤트라도 확인 후 재적용할 수 있다.
+  /// 스케줄이 종료된 이벤트에서만 적용할 수 있다.
+  Future<void> _manuallyApplyAttendancePoints(Map<String, dynamic> event) async {
+    if (event['status'] != 'closed') return;
+
+    final eventId = event['_id'] as String;
+    final alreadyApplied = event['pointsApplied'] == true;
+    final isFireDrill = event['isFireDrill'] == true;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ContentDialog(
+        title: const Text('상벌점 적용'),
+        content: Text(
+          alreadyApplied
+              ? '이미 상벌점이 적용된 이벤트입니다. 다시 적용하시겠습니까?\n'
+                    '(재적용 시 상벌점 이력이 다시 추가됩니다)'
+              : isFireDrill
+                  ? '재실 학생 전체에게 출석 여부에 따라 상벌점(상점 0006 / 벌점 0134)을 적용하시겠습니까?'
+                  : '미출석 학생에게 상태(외박미신청 0139 / 외박미수정 0140)에 따라 상벌점을 적용하시겠습니까?\n'
+                        '(외박·바롬인성교육관·무단퇴사·상태 미지정 학생은 열외 처리됩니다)',
+        ),
+        actions: [
+          Button(
+            child: const Text('취소'),
+            onPressed: () => Navigator.pop(ctx, false),
+          ),
+          FilledButton(
+            child: const Text('적용'),
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _applyAttendancePoints(eventId, force: true);
+      _loadEvents(showLoading: false);
+      if (!mounted) return;
+      await displayInfoBar(
+        context,
+        builder: (context, close) => InfoBar(
+          title: const Text('상벌점 적용 완료'),
+          severity: InfoBarSeverity.success,
+          action: IconButton(icon: const Icon(FluentIcons.clear), onPressed: close),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      await displayInfoBar(
+        context,
+        builder: (context, close) => InfoBar(
+          title: Text('상벌점 적용 실패: $e'),
+          severity: InfoBarSeverity.error,
+          action: IconButton(icon: const Icon(FluentIcons.clear), onPressed: close),
+        ),
+      );
     }
   }
 
@@ -1671,9 +2382,14 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         title: const Text('스케줄 삭제'),
         content: const Text('스케줄을 삭제하시겠습니까? 점검이력 기록은 삭제되지 않고 유지됩니다.'),
         actions: [
-          Button(child: const Text('취소'), onPressed: () => Navigator.pop(ctx, false)),
+          Button(
+            child: const Text('취소'),
+            onPressed: () => Navigator.pop(ctx, false),
+          ),
           FilledButton(
-            style: ButtonStyle(backgroundColor: WidgetStateProperty.all(Colors.red)),
+            style: ButtonStyle(
+              backgroundColor: WidgetStateProperty.all(Colors.red),
+            ),
             child: const Text('삭제'),
             onPressed: () => Navigator.pop(ctx, true),
           ),
@@ -1685,14 +2401,24 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       // 이벤트 문서만 삭제하고, attendance_records(QR 체크인·상태 기록)는 이력 보존을 위해 남겨둔다.
       await _firestore.collection('attendance_events').doc(eventId).delete();
       if (_selectedEvent?['_id'] == eventId) {
-        setState(() { _selectedEvent = null; _records = []; });
+        setState(() {
+          _selectedEvent = null;
+          _records = [];
+        });
       }
-      _loadEvents();
+      _loadEvents(showLoading: false);
     } catch (e) {
       if (mounted) {
-        await displayInfoBar(context, builder: (context, close) {
-          return InfoBar(title: const Text('오류'), content: Text('삭제 실패: $e'), severity: InfoBarSeverity.error);
-        });
+        await displayInfoBar(
+          context,
+          builder: (context, close) {
+            return InfoBar(
+              title: const Text('오류'),
+              content: Text('삭제 실패: $e'),
+              severity: InfoBarSeverity.error,
+            );
+          },
+        );
       }
     }
   }
@@ -1706,9 +2432,14 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         title: const Text('선택 스케줄 삭제'),
         content: Text('선택한 $count개 스케줄을 삭제하시겠습니까? 점검이력 기록은 삭제되지 않고 유지됩니다.'),
         actions: [
-          Button(child: const Text('취소'), onPressed: () => Navigator.pop(ctx, false)),
+          Button(
+            child: const Text('취소'),
+            onPressed: () => Navigator.pop(ctx, false),
+          ),
           FilledButton(
-            style: ButtonStyle(backgroundColor: WidgetStateProperty.all(Colors.red)),
+            style: ButtonStyle(
+              backgroundColor: WidgetStateProperty.all(Colors.red),
+            ),
             child: const Text('삭제'),
             onPressed: () => Navigator.pop(ctx, true),
           ),
@@ -1724,25 +2455,42 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
       }
       await batch.commit();
 
-      if (_selectedEvent != null && _selectedEventIds.contains(_selectedEvent!['_id'])) {
-        setState(() { _selectedEvent = null; _records = []; });
+      if (_selectedEvent != null &&
+          _selectedEventIds.contains(_selectedEvent!['_id'])) {
+        setState(() {
+          _selectedEvent = null;
+          _records = [];
+        });
       }
       setState(() {
         _selectedEventIds.clear();
         _isSelectionMode = false;
       });
-      _loadEvents();
+      _loadEvents(showLoading: false);
 
       if (mounted) {
-        await displayInfoBar(context, builder: (context, close) {
-          return InfoBar(title: Text('$count개 이벤트가 삭제되었습니다.'), severity: InfoBarSeverity.success);
-        });
+        await displayInfoBar(
+          context,
+          builder: (context, close) {
+            return InfoBar(
+              title: Text('$count개 이벤트가 삭제되었습니다.'),
+              severity: InfoBarSeverity.success,
+            );
+          },
+        );
       }
     } catch (e) {
       if (mounted) {
-        await displayInfoBar(context, builder: (context, close) {
-          return InfoBar(title: const Text('오류'), content: Text('삭제 실패: $e'), severity: InfoBarSeverity.error);
-        });
+        await displayInfoBar(
+          context,
+          builder: (context, close) {
+            return InfoBar(
+              title: const Text('오류'),
+              content: Text('삭제 실패: $e'),
+              severity: InfoBarSeverity.error,
+            );
+          },
+        );
       }
     }
   }
@@ -1755,14 +2503,21 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
         await _firestore.collection('attendance_events').doc(eventId).update({
           'attendeeCount': FieldValue.increment(-1),
         });
-        _loadEvents();
+        _loadEvents(showLoading: false);
         _loadRecords(eventId);
       }
     } catch (e) {
       if (mounted) {
-        await displayInfoBar(context, builder: (context, close) {
-          return InfoBar(title: const Text('오류'), content: Text('삭제 실패: $e'), severity: InfoBarSeverity.error);
-        });
+        await displayInfoBar(
+          context,
+          builder: (context, close) {
+            return InfoBar(
+              title: const Text('오류'),
+              content: Text('삭제 실패: $e'),
+              severity: InfoBarSeverity.error,
+            );
+          },
+        );
       }
     }
   }
@@ -1772,7 +2527,8 @@ class _WindowsAttendanceScreenState extends State<WindowsAttendanceScreen> {
 class _AttendanceEventCreateDialog extends StatefulWidget {
   final FirebaseFirestore firestore;
   final Future<Map<String, bool>> Function(String floor) loadRoomsForFloor;
-  final Future<void> Function(String title, String floor, bool isFireDrill) onCreateFloorWide;
+  final Future<void> Function(String title, String floor, bool isFireDrill)
+  onCreateFloorWide;
 
   const _AttendanceEventCreateDialog({
     required this.firestore,
@@ -1781,10 +2537,12 @@ class _AttendanceEventCreateDialog extends StatefulWidget {
   });
 
   @override
-  State<_AttendanceEventCreateDialog> createState() => _AttendanceEventCreateDialogState();
+  State<_AttendanceEventCreateDialog> createState() =>
+      _AttendanceEventCreateDialogState();
 }
 
-class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDialog> {
+class _AttendanceEventCreateDialogState
+    extends State<_AttendanceEventCreateDialog> {
   final _titleController = TextEditingController();
   String? _selectedFloor;
   // 호실번호 -> 거주 학생 존재 여부
@@ -1801,7 +2559,11 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
   }
 
   Future<void> _onFloorChanged(String floor) async {
-    setState(() { _selectedFloor = floor; _isLoadingRooms = true; _rooms = {}; });
+    setState(() {
+      _selectedFloor = floor;
+      _isLoadingRooms = true;
+      _rooms = {};
+    });
     final rooms = await widget.loadRoomsForFloor(floor);
     if (!mounted) return;
     setState(() {
@@ -1814,9 +2576,14 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
 
   // 재실 학생이 있는 호실 중 가장 작은/큰 호수 (예: "201호 ~ 726호")
   String? get _occupiedRoomRangeLabel {
-    final occupied = _rooms.entries.where((e) => e.value).map((e) => e.key).toList();
+    final occupied = _rooms.entries
+        .where((e) => e.value)
+        .map((e) => e.key)
+        .toList();
     if (occupied.isEmpty) return null;
-    occupied.sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
+    occupied.sort(
+      (a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0),
+    );
     final first = occupied.first;
     final last = occupied.last;
     return first == last ? '$first호' : '$first호 ~ $last호';
@@ -1824,7 +2591,8 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
 
   @override
   Widget build(BuildContext context) {
-    final canCreate = !_isCreating &&
+    final canCreate =
+        !_isCreating &&
         _titleController.text.trim().isNotEmpty &&
         _selectedFloor != null &&
         _occupiedRoomCount > 0;
@@ -1839,7 +2607,10 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // 이벤트명
-              const Text('점검스케줄 *', style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text(
+                '점검스케줄 *',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 8),
               TextBox(
                 controller: _titleController,
@@ -1848,18 +2619,28 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
               ),
               const SizedBox(height: 16),
               // 관리구역
-              const Text('관리구역 *', style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text(
+                '관리구역 *',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 8),
               ComboBox<String>(
                 value: _selectedFloor,
                 isExpanded: true,
                 placeholder: const Text('구역 선택'),
-                items: kFloorOptions.map((f) => ComboBoxItem(value: f, child: Text(f))).toList(),
-                onChanged: (v) { if (v != null) _onFloorChanged(v); },
+                items: kFloorOptions
+                    .map((f) => ComboBoxItem(value: f, child: Text(f)))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) _onFloorChanged(v);
+                },
               ),
               const SizedBox(height: 16),
               // 생성 방식 선택 (둘 다 구역 전체를 1개 이벤트로 생성. 화재대피용만 종료 시 상벌점 자동 부여)
-              const Text('생성 방식', style: TextStyle(fontWeight: FontWeight.w600)),
+              const Text(
+                '생성 방식',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -1869,7 +2650,10 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
                       onChanged: (v) {
                         if (v) setState(() => _isFireDrill = false);
                       },
-                      content: const Text('일반 인원점검', style: TextStyle(fontSize: 13)),
+                      content: const Text(
+                        '일반 인원점검',
+                        style: TextStyle(fontSize: 13),
+                      ),
                     ),
                   ),
                   Expanded(
@@ -1878,7 +2662,10 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
                       onChanged: (v) {
                         if (v) setState(() => _isFireDrill = true);
                       },
-                      content: const Text('"화재대피용" 인원점검', style: TextStyle(fontSize: 13)),
+                      content: const Text(
+                        '"화재대피용" 인원점검',
+                        style: TextStyle(fontSize: 13),
+                      ),
                     ),
                   ),
                 ],
@@ -1889,17 +2676,31 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
                 const Divider(),
                 const SizedBox(height: 8),
                 if (_isLoadingRooms)
-                  Column(children: List.generate(4, (_) => const Padding(padding: EdgeInsets.only(bottom: 6), child: AttendanceRowShimmer())))
+                  Column(
+                    children: List.generate(
+                      4,
+                      (_) => const Padding(
+                        padding: EdgeInsets.only(bottom: 6),
+                        child: AttendanceRowShimmer(),
+                      ),
+                    ),
+                  )
                 else
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: FluentTheme.of(context).accentColor.withOpacity(0.08),
+                      color: FluentTheme.of(
+                        context,
+                      ).accentColor.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Row(
                       children: [
-                        Icon(FluentIcons.info, size: 16, color: FluentTheme.of(context).accentColor),
+                        Icon(
+                          FluentIcons.info,
+                          size: 16,
+                          color: FluentTheme.of(context).accentColor,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -1934,11 +2735,14 @@ class _AttendanceEventCreateDialogState extends State<_AttendanceEventCreateDial
                 }
               : null,
           child: _isCreating
-              ? const SizedBox(width: 16, height: 16, child: ProgressRing(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: ProgressRing(strokeWidth: 2),
+                )
               : const Text('생성'),
         ),
       ],
     );
   }
 }
-

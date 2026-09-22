@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../providers/locale_provider.dart';
+import '../../services/server_clock.dart';
 import '../../utils/attendance_strings.dart';
 import '../../widgets/user_avatar.dart';
 
@@ -47,6 +48,11 @@ class _MyQrCodePageState extends State<MyQrCodePage> {
   void initState() {
     super.initState();
     _regenerateQr();
+    // 폰 시계가 어긋나 있어도 층장앱과 같은 기준(서버 시각)으로 발급되도록,
+    // 동기화가 끝나면 QR을 한 번 다시 만든다. 실패하면 기기 시각으로 계속 발급한다.
+    ServerClock.sync().then((_) {
+      if (mounted) _regenerateQr();
+    });
     _refreshTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_remainingSeconds > 1) {
         setState(() => _remainingSeconds--);
@@ -91,7 +97,7 @@ class _MyQrCodePageState extends State<MyQrCodePage> {
 
   void _regenerateQr() {
     setState(() {
-      _issuedAtMs = DateTime.now().millisecondsSinceEpoch;
+      _issuedAtMs = ServerClock.nowMs();
       _remainingSeconds = _validSeconds;
     });
   }
@@ -166,7 +172,7 @@ class _MyQrCodePageState extends State<MyQrCodePage> {
                       border: Border.all(color: Colors.grey.shade300),
                     ),
                     child: Text(
-                      DateFormat('MM.dd HH:mm:ss').format(DateTime.now()),
+                      DateFormat('MM.dd HH:mm:ss').format(ServerClock.now().toSeoul()),
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
