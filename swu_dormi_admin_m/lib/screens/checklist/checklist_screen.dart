@@ -197,13 +197,18 @@ class _MyChecklistTabState extends State<_MyChecklistTab> {
   }
 
   Future<void> _showTypeSelectDialog() async {
+    // 샬롬 지하·국생 사생회는 신규 작성 목록에서 제외한다. 다만 kChecklistTemplates
+    // 자체(템플릿 데이터)는 그대로 두어야 이미 제출된 옛 점검표를 계속 조회할 수 있다.
+    final selectableTemplates = kChecklistTemplates
+        .where((t) => t.id != 'shalom_b1' && t.id != 'guksaeng_saenghoei')
+        .toList();
     final selected = await showDialog<ChecklistTemplate>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('점검표 유형 선택'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: kChecklistTemplates.map((t) => ListTile(
+          children: selectableTemplates.map((t) => ListTile(
             leading: const Icon(Icons.checklist_rtl, color: Color(0xFFA6BF96)),
             title: Text(_templateLabel(t.id)),
             subtitle: Text(t.title, style: const TextStyle(fontSize: 11)),
