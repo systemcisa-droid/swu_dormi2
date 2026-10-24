@@ -210,7 +210,12 @@ class _NoticesScreenState extends State<NoticesScreen> {
             ),
           );
         }
-        final notices = snapshot.data!;
+        // 고정(중요) 공지를 맨 위로 올린다. 쿼리 자체는 createdAt 내림차순이라,
+        // 각 그룹 내부의 최신순 정렬은 그대로 유지된다(단순 필터링이라 안정적).
+        final notices = [
+          ...snapshot.data!.where((n) => n.isImportant),
+          ...snapshot.data!.where((n) => !n.isImportant),
+        ];
         return SingleChildScrollView(
           child: Column(
             children: [
@@ -256,15 +261,38 @@ class _NoticesScreenState extends State<NoticesScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        notice.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          height: 1.3,
-                        ),
+                      Row(
+                        children: [
+                          if (notice.isImportant)
+                            Container(
+                              margin: const EdgeInsets.only(right: 6),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                s.important,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          Expanded(
+                            child: Text(
+                              notice.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                height: 1.3,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 4),
                       Text(

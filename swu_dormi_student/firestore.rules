@@ -415,9 +415,24 @@ service cloud.firestore {
         allow read: if isSignedIn();
         // 본인 uid로만 메시지 작성, readBy 업데이트도 허용
         allow create: if isSignedIn() && request.resource.data.senderId == request.auth.uid;
+        // readBy는 누구나 갱신 가능. reactions는 내 반응(내 uid 키)만 바꿀 수 있다
+        // (다른 사람이 단 반응을 덮어쓰지 못하도록 nested key까지 검사).
+        // text/edited/editedAt(메시지 수정)은 본인이 보낸 메시지에서만 바꿀 수 있다.
         allow update: if isSignedIn() &&
-                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']);
-        allow delete: if isAdmin();
+                        (
+                          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readBy']) ||
+                          (
+                            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']) &&
+                            request.resource.data.reactions.diff(resource.data.get('reactions', {})).affectedKeys().hasOnly([request.auth.uid])
+                          ) ||
+                          (
+                            resource.data.senderId == request.auth.uid &&
+                            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'edited', 'editedAt'])
+                          )
+                        );
+        // 본인이 보낸 메시지는 직접 삭제할 수 있다(길게 눌러 삭제).
+        allow delete: if isAdmin() ||
+                        (isSignedIn() && resource.data.senderId == request.auth.uid);
       }
     }
 

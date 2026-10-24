@@ -7,6 +7,7 @@ import '../../models/post_model.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
 import '../../utils/board_strings.dart';
+import '../../widgets/timetable_preview.dart';
 import 'add_post_screen.dart';
 import 'post_detail_screen.dart';
 
@@ -275,12 +276,17 @@ class _BoardScreenState extends State<BoardScreen> {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 6),
-              Text(
-                post.content,
-                style: TextStyle(fontSize: 14, color: Colors.grey[700]),
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
+              // 시간표 공유 글은 목록에서도 바로 시간표 모양을 보여준다(글이 자동 생성한
+              // 텍스트 요약을 굳이 또 보여줄 필요는 없다).
+              if (post.category == '시간표 공유' && post.timetableClasses.isNotEmpty)
+                TimetablePreview(classes: post.timetableClasses, compact: true)
+              else
+                Text(
+                  post.content,
+                  style: TextStyle(fontSize: 14, color: Colors.grey[700]),
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
               if (post.imageUrls.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 SizedBox(

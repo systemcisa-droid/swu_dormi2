@@ -49,5 +49,7 @@
 		<false/>
 		<key>UIViewControllerBasedStatusBarAppearance</key>
 		<false/>
+		<key>NSCameraUsageDescription</key>
+		<string>알람을 끄기 위한 QR 코드 스캔에 카메라를 사용합니다.</string>
 	</dict>
 </plist>

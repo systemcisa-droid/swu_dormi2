@@ -24,6 +24,7 @@ class BoardStrings {
     '정보 알림': 'Info & Alerts',
     '세탁실톡': 'Laundry Room Talk',
     '맛집': 'Restaurants',
+    '시간표 공유': 'Timetable Share',
   };
   String categoryLabel(String ko) => isEnglish ? (_categoryEn[ko] ?? ko) : ko;
 
@@ -41,6 +42,7 @@ class BoardStrings {
     '정보 알림': '행사, 정보, 팁 공유해요',
     '세탁실톡': '세탁기, 건조기 사용 후에 깜빡 하셨지요?!',
     '맛집': '학교 근처 맛집 추천해요!',
+    '시간표 공유': '내 시간표 공유하기',
   };
   static const Map<String, String> _titleHintEn = {
     'lost&found': 'What did you lose?',
@@ -49,6 +51,7 @@ class BoardStrings {
     '정보 알림': 'Share events, info, and tips',
     '세탁실톡': 'Forgot to grab your laundry from the washer/dryer?!',
     '맛집': 'Share a good restaurant near campus!',
+    '시간표 공유': 'Share my timetable',
   };
   String postTitleHint(String categoryValue) {
     final map = isEnglish ? _titleHintEn : _titleHintKo;
@@ -65,6 +68,7 @@ class BoardStrings {
     '정보 알림': '예) 땡땡인의 밤 모여 취업, 행사 등 정보 공유해요~',
     '세탁실톡': '예) 8번 세탁기 완료 빨래 찾아가세요~',
     '맛집': '예) 정문 앞 000집 존맛! 가성비 좋아요~',
+    '시간표 공유': '시간표 화면의 공유 체크박스로 자동 등록되는 게시글입니다.',
   };
   static const Map<String, String> _contentHintEn = {
     'lost&found': 'e.g. I lost 0000. If you\'ve seen it, please raise your hand!',
@@ -73,6 +77,7 @@ class BoardStrings {
     '정보 알림': 'e.g. Gather info on jobs, events, and more with fellow students~',
     '세탁실톡': 'e.g. Washer #8 is done, please pick up your laundry~',
     '맛집': 'e.g. The pasta place by the main gate is amazing and affordable~',
+    '시간표 공유': 'This post is auto-created from the share checkbox on the timetable screen.',
   };
   String contentHint(String categoryValue) {
     final map = isEnglish ? _contentHintEn : _contentHintKo;

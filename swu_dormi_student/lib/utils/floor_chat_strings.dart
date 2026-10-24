@@ -23,6 +23,25 @@ class FloorChatStrings {
       'Chat is unavailable between 00:30 and 09:00');
 
   String get inputHint => _t('메시지를 입력하세요...', 'Type a message...');
+  String get messageCopied => _t('메시지가 복사되었습니다', 'Message copied');
+
+  /// 메시지 길게 누르기 메뉴
+  String get menuCopy => _t('복사', 'Copy');
+  String get menuSelectCopy => _t('선택 복사', 'Select text');
+  String get menuPin => _t('공지', 'Notice');
+  String get menuUnpin => _t('공지 해제', 'Remove notice');
+  String get menuEdit => _t('수정', 'Edit');
+  String get menuDelete => _t('삭제', 'Delete');
+  String get deleteMessageTitle => _t('메시지 삭제', 'Delete message');
+  String get deleteMessageConfirm =>
+      _t('이 메시지를 삭제하시겠습니까?', 'Delete this message?');
+  String deleteError(Object e) => _t('삭제 오류: $e', 'Delete error: $e');
+  String get cancel => _t('취소', 'Cancel');
+  String get save => _t('저장', 'Save');
+  String get close => _t('닫기', 'Close');
+  String get editMessageTitle => _t('메시지 수정', 'Edit message');
+  String editError(Object e) => _t('수정 오류: $e', 'Edit error: $e');
+  String get editedLabel => _t('(수정됨)', '(edited)');
   String get attachTooltip => _t('사진/영상 첨부', 'Attach photo/video');
   String get pickImage => _t('사진 선택', 'Choose photo');
   String get pickVideo => _t('영상 선택', 'Choose video');

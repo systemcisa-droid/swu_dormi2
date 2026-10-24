@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../models/post_model.dart';
 import '../../utils/constants.dart';
 
 // --- Models ---
@@ -57,11 +61,17 @@ class TimetableData {
   String id;
   String name;
   List<ClassItem> classes;
+  // 게시판 공유 체크박스 상태. 켜져 있으면 sharedPostId가 그 시간표를 공유 중인
+  // board_posts 문서를 가리킨다(수업을 고치면 같은 문서를 갱신, 체크 해제 시 삭제).
+  bool isShared;
+  String? sharedPostId;
 
   TimetableData({
     required this.id,
     required this.name,
     required this.classes,
+    this.isShared = false,
+    this.sharedPostId,
   });
 
   Map<String, dynamic> toMap() {
@@ -69,6 +79,8 @@ class TimetableData {
       'id': id,
       'name': name,
       'classes': classes.map((x) => x.toMap()).toList(),
+      'isShared': isShared,
+      'sharedPostId': sharedPostId,
     };
   }
 
@@ -79,6 +91,8 @@ class TimetableData {
       classes: List<ClassItem>.from(
         map['classes']?.map((x) => ClassItem.fromMap(x)) ?? [],
       ),
+      isShared: map['isShared'] == true,
+      sharedPostId: map['sharedPostId'] as String?,
     );
   }
 }
@@ -138,6 +152,153 @@ class _TimetablePageState extends State<TimetablePage> {
     final String jsonStr = jsonEncode(_timetables.map((t) => t.toMap()).toList());
     await prefs.setString('timetables_data', jsonStr);
     await prefs.setString('current_timetable_id', _currentTimetableId);
+  }
+
+  // --- 게시판 공유 ---
+
+  /// 수업 목록을 게시글 본문용 텍스트로 요약한다(요일·시간순 정렬).
+  String _buildShareContent(List<ClassItem> classes) {
+    if (classes.isEmpty) return '아직 등록된 수업이 없어요.';
+    final days = ['월', '화', '수', '목', '금'];
+    final sorted = List<ClassItem>.from(classes)
+      ..sort((a, b) {
+        if (a.dayIndex != b.dayIndex) return a.dayIndex.compareTo(b.dayIndex);
+        return (a.startHour * 60 + a.startMinute).compareTo(b.startHour * 60 + b.startMinute);
+      });
+    return sorted.map((c) {
+      final endTotal = c.startHour * 60 + c.startMinute + c.durationMinutes.toInt();
+      final end = '${endTotal ~/ 60}:${(endTotal % 60).toString().padLeft(2, '0')}';
+      final start = '${c.startHour}:${c.startMinute.toString().padLeft(2, '0')}';
+      return '${days[c.dayIndex]} $start~$end  ${c.title} (${c.room})';
+    }).join('\n');
+  }
+
+  /// 공유 체크박스를 켜고 끈다. 켜면 board_posts에 새 글을 만들고, 끄면 그 글을 지운다.
+  Future<void> _toggleShare(bool value) async {
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('로그인이 필요합니다')),
+      );
+      return;
+    }
+
+    final timetable = _currentTimetable;
+    final firestore = FirebaseFirestore.instance;
+
+    try {
+      if (value) {
+        final postId = firestore.collection('board_posts').doc().id;
+        final post = PostModel(
+          id: postId,
+          title: '${timetable.name} 시간표 공유',
+          content: _buildShareContent(timetable.classes),
+          authorId: user.uid,
+          authorName: user.name,
+          authorNickname: user.nickname,
+          authorProfileImageUrl: user.profileImageUrl,
+          createdAt: DateTime.now(),
+          category: '시간표 공유',
+          timetableClasses: timetable.classes.map((c) => c.toMap()).toList(),
+        );
+        await firestore.collection('board_posts').doc(postId).set(post.toMap());
+        setState(() {
+          timetable.isShared = true;
+          timetable.sharedPostId = postId;
+        });
+      } else {
+        final postId = timetable.sharedPostId;
+        if (postId != null) {
+          try {
+            await firestore.collection('board_posts').doc(postId).delete();
+          } catch (_) {
+            // 게시판에서 이미 지워진 글이면(예: 사용자가 게시판에서 직접 삭제) 문서가
+            // 없어 보안 규칙상 permission-denied가 난다. 목표(공유 해제)는 이미
+            // 달성된 상태이므로 무시하고 로컬 상태만 정리한다.
+          }
+        }
+        setState(() {
+          timetable.isShared = false;
+          timetable.sharedPostId = null;
+        });
+      }
+      await _saveData();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('공유 설정 중 오류가 발생했습니다: $e')),
+      );
+    }
+  }
+
+  /// 공유 중인 시간표가 수정되면(수업 추가/수정/삭제) 게시판 글도 최신 내용으로 갱신한다.
+  Future<void> _syncSharedPostIfNeeded() async {
+    final timetable = _currentTimetable;
+    if (!timetable.isShared) return;
+    await _updateSharedPost(timetable);
+  }
+
+  /// timetable이 공유 중이면 연결된 게시판 글의 제목/내용을 최신 상태로 덮어쓴다.
+  /// 이름 변경, 수업 추가/수정/삭제 등 시간표가 바뀌는 모든 곳에서 공용으로 쓴다.
+  Future<void> _updateSharedPost(TimetableData timetable) async {
+    if (!timetable.isShared || timetable.sharedPostId == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('board_posts')
+          .doc(timetable.sharedPostId)
+          .update({
+        'title': '${timetable.name} 시간표 공유',
+        'content': _buildShareContent(timetable.classes),
+        'timetableClasses': timetable.classes.map((c) => c.toMap()).toList(),
+        'updatedAt': Timestamp.now(),
+      });
+    } catch (_) {
+      // 게시판에서 이미 지워진 글이면 갱신이 계속 실패하므로, 공유 해제 상태로
+      // 되돌려 체크박스가 실제 상태(공유 안 됨)를 보여주게 한다.
+      if (!mounted) return;
+      setState(() {
+        timetable.isShared = false;
+        timetable.sharedPostId = null;
+      });
+      await _saveData();
+    }
+  }
+
+  /// 시간표 이름 변경 다이얼로그. 공유 중이면 게시판 글 제목도 함께 갱신한다.
+  Future<void> _renameTimetable(TimetableData timetable, StateSetter setModalState) async {
+    final controller = TextEditingController(text: timetable.name);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('시간표 이름 변경'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 30,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          ElevatedButton(
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isEmpty) return;
+              Navigator.pop(ctx, trimmed);
+            },
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    // 다이얼로그 닫힘 애니메이션이 끝나기 전에 컨트롤러를 지우면 프레임워크 내부
+    // 어설션(InheritedElement._dependents.isEmpty)이 깨질 수 있어 dispose하지 않는다.
+    // 이 파일의 다른 다이얼로그(_showAddEditDialog 등)도 같은 방식이다.
+    if (newName == null || newName == timetable.name) return;
+
+    setState(() => timetable.name = newName);
+    setModalState(() {});
+    await _saveData();
+    await _updateSharedPost(timetable);
   }
 
   void _initializeData() {
@@ -230,7 +391,35 @@ class _TimetablePageState extends State<TimetablePage> {
           const SizedBox(width: 8),
         ],
       ),
-      body: _isGridView ? _buildGridView() : _buildListView(),
+      body: Column(
+        children: [
+          _buildShareRow(),
+          Expanded(child: _isGridView ? _buildGridView() : _buildListView()),
+        ],
+      ),
+    );
+  }
+
+  /// 게시판 공유 체크박스. 체크하면 이 시간표를 게시판(카테고리: 시간표 공유)에 올리고,
+  /// 해제하면 올렸던 글을 지운다.
+  Widget _buildShareRow() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          const Text('게시판에 공유하기', style: TextStyle(fontSize: 13)),
+          Checkbox(
+            value: _currentTimetable.isShared,
+            activeColor: AppConstants.primaryColor,
+            onChanged: (v) => _toggleShare(v ?? false),
+          ),
+        ],
+      ),
     );
   }
 
@@ -431,6 +620,7 @@ class _TimetablePageState extends State<TimetablePage> {
               _classes.removeWhere((c) => c.id == item.id);
             });
             _saveData();
+            _syncSharedPostIfNeeded();
           },
           child: GestureDetector(
             onTap: () => _showAddEditDialog(item: item),
@@ -533,11 +723,70 @@ class _TimetablePageState extends State<TimetablePage> {
 
   // --- Timetable Manager ---
 
+  /// 좌측으로 스와이프했을 때 삭제 여부를 묻는다. 최소 1개는 남아야 하므로
+  /// 마지막 하나는 스와이프해도 안내만 하고 지우지 않는다.
+  Future<bool> _confirmDeleteTimetable(TimetableData timetable) async {
+    if (_timetables.length <= 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('마지막 시간표는 삭제할 수 없습니다')),
+      );
+      return false;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('시간표 삭제'),
+        content: Text(
+          timetable.isShared
+              ? '「${timetable.name}」을(를) 삭제하시겠습니까?\n게시판에 공유된 글도 함께 삭제됩니다.'
+              : '「${timetable.name}」을(를) 삭제하시겠습니까?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('아니요')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('예', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
+  }
+
+  /// 확인을 마친 뒤 실제로 시간표를 지운다. 공유 중이던 시간표면 게시판 글도 함께 지운다.
+  Future<void> _performDeleteTimetable(TimetableData timetable, StateSetter setModalState) async {
+    if (timetable.isShared && timetable.sharedPostId != null) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('board_posts')
+            .doc(timetable.sharedPostId)
+            .delete();
+      } catch (_) {
+        // 게시판에서 이미 지워진 글이면 무시한다.
+      }
+    }
+
+    setState(() {
+      _timetables.removeWhere((t) => t.id == timetable.id);
+      if (_currentTimetableId == timetable.id) {
+        _currentTimetableId = _timetables.first.id;
+      }
+    });
+    setModalState(() {});
+    await _saveData();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('시간표를 삭제했습니다')),
+    );
+  }
+
   void _showTimetableManager() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -564,34 +813,56 @@ class _TimetablePageState extends State<TimetablePage> {
                 ),
               ),
               const SizedBox(height: 16),
-              ..._timetables.map((timetable) => ListTile(
-                leading: Icon(
-                  Icons.schedule,
-                  color: timetable.id == _currentTimetableId
-                      ? AppConstants.primaryColor
-                      : Colors.grey,
+              ..._timetables.map((timetable) => Dismissible(
+                key: ValueKey(timetable.id),
+                direction: DismissDirection.endToStart,
+                background: Container(
+                  alignment: Alignment.centerRight,
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  color: Colors.red,
+                  child: const Icon(Icons.delete, color: Colors.white),
                 ),
-                title: Text(
-                  timetable.name,
-                  style: TextStyle(
-                    fontWeight: timetable.id == _currentTimetableId
-                        ? FontWeight.bold
-                        : FontWeight.normal,
+                confirmDismiss: (_) => _confirmDeleteTimetable(timetable),
+                onDismissed: (_) => _performDeleteTimetable(timetable, setModalState),
+                child: ListTile(
+                  leading: Icon(
+                    Icons.schedule,
                     color: timetable.id == _currentTimetableId
                         ? AppConstants.primaryColor
-                        : Colors.black87,
+                        : Colors.grey,
                   ),
+                  title: Text(
+                    timetable.name,
+                    style: TextStyle(
+                      fontWeight: timetable.id == _currentTimetableId
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: timetable.id == _currentTimetableId
+                          ? AppConstants.primaryColor
+                          : Colors.black87,
+                    ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (timetable.id == _currentTimetableId)
+                        Icon(Icons.check, color: AppConstants.primaryColor),
+                      IconButton(
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        color: Colors.grey[500],
+                        tooltip: '이름 변경',
+                        onPressed: () => _renameTimetable(timetable, setModalState),
+                      ),
+                    ],
+                  ),
+                  onTap: () {
+                    setState(() {
+                      _currentTimetableId = timetable.id;
+                    });
+                    _saveData();
+                    Navigator.pop(context);
+                  },
                 ),
-                trailing: timetable.id == _currentTimetableId
-                    ? Icon(Icons.check, color: AppConstants.primaryColor)
-                    : null,
-                onTap: () {
-                  setState(() {
-                    _currentTimetableId = timetable.id;
-                  });
-                  _saveData();
-                  Navigator.pop(context);
-                },
               )),
               ListTile(
                 leading: const Icon(Icons.add, color: Colors.grey),
@@ -604,6 +875,7 @@ class _TimetablePageState extends State<TimetablePage> {
               const SizedBox(height: 16),
             ],
           ),
+        ),
         ),
       ),
     );
@@ -974,6 +1246,7 @@ class _TimetablePageState extends State<TimetablePage> {
                               }
                             });
                             _saveData();
+                            _syncSharedPostIfNeeded();
                             Navigator.pop(context);
                           },
                           style: ElevatedButton.styleFrom(

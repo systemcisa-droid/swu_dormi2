@@ -17,6 +17,9 @@ class PostModel {
   final List<String> viewedUsers; // 조회한 사용자 ID 리스트
   final List<String> imageUrls;
   final String category; // '물품 나눔', '정보 알림', 'lost&found'
+  // category == '시간표 공유'인 글에만 채워진다. 각 원소는 timetable_page.dart의
+  // ClassItem.toMap() 형태(title/room/dayIndex/startHour/startMinute/durationMinutes/color).
+  final List<Map<String, dynamic>> timetableClasses;
 
   PostModel({
     required this.id,
@@ -35,6 +38,7 @@ class PostModel {
     this.viewedUsers = const [],
     this.imageUrls = const [],
     this.category = 'lost&found',
+    this.timetableClasses = const [],
   });
 
   Map<String, dynamic> toMap() {
@@ -55,6 +59,7 @@ class PostModel {
       'viewedUsers': viewedUsers,
       'imageUrls': imageUrls,
       'category': category,
+      if (timetableClasses.isNotEmpty) 'timetableClasses': timetableClasses,
     };
   }
 
@@ -90,6 +95,13 @@ class PostModel {
       imageUrls = List<String>.from(map['imageUrls']);
     }
 
+    List<Map<String, dynamic>> timetableClasses = [];
+    if (map['timetableClasses'] != null && map['timetableClasses'] is List) {
+      timetableClasses = List<Map<String, dynamic>>.from(
+        (map['timetableClasses'] as List).map((e) => Map<String, dynamic>.from(e as Map)),
+      );
+    }
+
     return PostModel(
       id: map['id'] ?? '',
       title: map['title'] ?? '',
@@ -107,6 +119,7 @@ class PostModel {
       viewedUsers: viewedUsers,
       imageUrls: imageUrls,
       category: map['category'] ?? 'lost&found',
+      timetableClasses: timetableClasses,
     );
   }
 
@@ -127,6 +140,7 @@ class PostModel {
     List<String>? viewedUsers,
     List<String>? imageUrls,
     String? category,
+    List<Map<String, dynamic>>? timetableClasses,
   }) {
     return PostModel(
       id: id ?? this.id,
@@ -145,6 +159,7 @@ class PostModel {
       viewedUsers: viewedUsers ?? this.viewedUsers,
       imageUrls: imageUrls ?? this.imageUrls,
       category: category ?? this.category,
+      timetableClasses: timetableClasses ?? this.timetableClasses,
     );
   }
 }

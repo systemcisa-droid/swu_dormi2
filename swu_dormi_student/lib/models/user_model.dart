@@ -8,7 +8,6 @@ class UserModel {
   final String roomNumber; // 호실
   final String? seatNumber; // 자리번호
   final String role; // 'student' 또는 'admin'
-  final String? college; // 학부
   final String? department; // 학과
   final String? dormBuilding; // 기숙사 건물 (샬롬하우스, 국제생활관)
   final String? profileImageUrl;
@@ -28,7 +27,6 @@ class UserModel {
     this.roomNumber = '000', // 기본값 "000"
     this.seatNumber,
     this.role = 'student', // 기본값 "student"
-    this.college,
     this.department,
     this.dormBuilding,
     this.profileImageUrl,
@@ -113,7 +111,6 @@ class UserModel {
       'building': building, // 동 정보
       'floor': floor, // 층 정보
       'role': role,
-      'college': college,
       'department': department,
       'dormBuilding': dormBuilding,
       'profileImageUrl': profileImageUrl,
@@ -136,7 +133,6 @@ class UserModel {
       roomNumber: map['roomNumber'] ?? '000',
       seatNumber: map['seatNumber'],
       role: map['role'] ?? 'student',
-      college: map['college'],
       department: map['department'],
       dormBuilding: map['dormBuilding'],
       profileImageUrl: map['profileImageUrl'],

@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/post_model.dart';
 import '../../models/comment_model.dart';
 import '../../providers/auth_provider.dart';
@@ -9,6 +11,8 @@ import '../../providers/locale_provider.dart';
 import '../../services/database_service.dart';
 import '../../utils/board_strings.dart';
 import '../../widgets/linkified_text.dart';
+import '../../widgets/timetable_preview.dart';
+import '../timetable/timetable_page.dart';
 import 'add_post_screen.dart';
 
 class PostDetailScreen extends StatefulWidget {
@@ -42,6 +46,61 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
     if (user == null) return;
     await _db.incrementPostViewCount(widget.postId, user.uid);
+  }
+
+  /// 게시판에 공유된 시간표를 내 시간표 목록(SharedPreferences)에 새 시간표로 추가한다.
+  /// timetable_page.dart가 쓰는 저장 형식(ClassItem/TimetableData)을 그대로 재사용한다.
+  Future<void> _importTimetable(PostModel post) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('시간표 가져오기'),
+        content: const Text('이 시간표를 내 시간표 목록에 추가하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('가져오기')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final existingJson = prefs.getString('timetables_data');
+      final timetables = existingJson != null
+          ? List<dynamic>.from(jsonDecode(existingJson)).map((x) => TimetableData.fromMap(x)).toList()
+          : <TimetableData>[];
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      var importedName = post.title.replaceFirst(RegExp(r'\s*시간표 공유\s*$'), '').trim();
+      if (importedName.isEmpty) importedName = '가져온 시간표';
+
+      // id가 원본 시간표와 겹치면(같은 기기에 이미 이 글의 원본이 있는 경우) 편집/삭제
+      // 시 서로 섞일 수 있으므로 새 id를 새로 부여한다.
+      final newClasses = <ClassItem>[
+        for (var i = 0; i < post.timetableClasses.length; i++)
+          ClassItem.fromMap(post.timetableClasses[i])..id = '$now-$i',
+      ];
+      final newTimetable = TimetableData(id: '$now', name: importedName, classes: newClasses);
+      timetables.add(newTimetable);
+
+      await prefs.setString(
+        'timetables_data',
+        jsonEncode(timetables.map((t) => t.toMap()).toList()),
+      );
+      await prefs.setString('current_timetable_id', newTimetable.id);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('내 시간표 목록에 추가했어요')),
+      );
+      Navigator.push(context, MaterialPageRoute(builder: (_) => const TimetablePage()));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('가져오기에 실패했습니다: $e')),
+      );
+    }
   }
 
   Future<void> _toggleLike(PostModel post, String userId) async {
@@ -569,6 +628,28 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   ),
                 ),
               )),
+          const SizedBox(height: 16),
+        ],
+        if (post.category == '시간표 공유' && post.timetableClasses.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey.shade200),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: TimetablePreview(classes: post.timetableClasses),
+          ),
+          const SizedBox(height: 10),
+          // 본인이 공유한 시간표는 가져올 필요가 없으므로 다른 학생에게만 보여준다.
+          if (user != null && user.uid != post.authorId)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _importTimetable(post),
+                icon: const Icon(Icons.download_outlined, size: 18),
+                label: const Text('내 시간표로 가져오기'),
+              ),
+            ),
           const SizedBox(height: 16),
         ],
         LinkifiedText(text: post.content, style: const TextStyle(fontSize: 15, height: 1.5)),

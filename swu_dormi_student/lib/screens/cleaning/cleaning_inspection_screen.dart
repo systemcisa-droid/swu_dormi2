@@ -412,20 +412,6 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
         final pendingRequest = _requests.where((r) =>
             (r['status'] ?? '') == 'pending' &&
             validScheduleIds.contains(r['scheduleId'])).firstOrNull;
-        // 재검사 필요 신청 (재신청 변경 기준)
-        final recheckRequest = _requests.where((r) => r['needsRecheck'] == true).firstOrNull;
-        // 재검사 기준 일정 날짜 (해당 scheduleId의 date)
-        DateTime? recheckDate;
-        if (recheckRequest != null) {
-          final recheckSid = recheckRequest['scheduleId'];
-          final recheckSchedule = _schedules.firstWhere(
-            (s) => s['_id'] == recheckSid,
-            orElse: () => <String, dynamic>{},
-          );
-          final dv = recheckSchedule['date'];
-          if (dv is Timestamp) recheckDate = dv.toDate();
-        }
-
         for (final schedule in _schedules) {
           final scheduleId = schedule['_id'] as String;
           final dateVal = schedule['date'];
@@ -434,7 +420,7 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
           final endTime = (schedule['endTime'] ?? '') as String;
           final label = '${DateFormat('MM/dd').format(date)} $startTime~$endTime';
           final request = requestByScheduleId[scheduleId] ?? requestByLabel[label];
-          items.add(_buildRequestHistoryItem(schedule, request, pendingRequest, strs, recheckRequest: recheckRequest, recheckDate: recheckDate));
+          items.add(_buildRequestHistoryItem(schedule, request, pendingRequest, strs));
         }
       }
     } else {
@@ -538,6 +524,19 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                           ),
                         ),
                       ),
+                      if (isAdminOnly)
+                        Container(
+                          margin: const EdgeInsets.only(top: 1),
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade50,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            strs.adminOnlyShort,
+                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.purple.shade700),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -665,7 +664,7 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
     );
   }
 
-  Widget _buildRequestHistoryItem(Map<String, dynamic> schedule, Map<String, dynamic>? request, Map<String, dynamic>? pendingRequest, CleaningInspectionStrings strs, {Map<String, dynamic>? recheckRequest, DateTime? recheckDate}) {
+  Widget _buildRequestHistoryItem(Map<String, dynamic> schedule, Map<String, dynamic>? request, Map<String, dynamic>? pendingRequest, CleaningInspectionStrings strs) {
     final scheduleId = schedule['_id'] as String;
     final dateVal = schedule['date'];
     final date = (dateVal is Timestamp) ? dateVal.toDate() : DateTime.now();
@@ -697,30 +696,19 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
       final inspectionDay = DateTime(date.year, date.month, date.day);
       final isBeforeInspectionDay = inspectionDay.isAfter(today);
       final canChange = pendingRequest != null && isAvailable && isBeforeInspectionDay;
-      // 재검사: 기존 검사일 이후 일정이고 신청 가능한 경우
-      final canRecheck = recheckRequest != null &&
-          pendingRequest == null &&
-          isAvailable &&
-          isBeforeInspectionDay &&
-          (recheckDate == null || date.isAfter(recheckDate));
-      final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
 
       return Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: canChange
-              ? () => _confirmChangeRequest(pendingRequest, schedule)
-              : canRecheck
-                  ? () => _showApplyDialog(schedule['_id'] as String, schedule, user)
-                  : null,
+          onTap: canChange ? () => _confirmChangeRequest(pendingRequest, schedule) : null,
           borderRadius: BorderRadius.circular(8),
           child: Container(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              border: Border.all(color: canChange ? Colors.amber.shade300 : canRecheck ? Colors.red.shade200 : Colors.grey.shade200),
+              border: Border.all(color: canChange ? Colors.amber.shade300 : Colors.grey.shade200),
               borderRadius: BorderRadius.circular(8),
-              color: canChange ? Colors.amber.shade50 : canRecheck ? Colors.red.shade50 : Colors.grey.shade50,
+              color: canChange ? Colors.amber.shade50 : Colors.grey.shade50,
             ),
             child: Row(
               children: [
@@ -728,7 +716,7 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                   width: 54,
                   height: 54,
                   decoration: BoxDecoration(
-                    color: canChange ? Colors.amber.shade100 : canRecheck ? Colors.red.shade100 : Colors.grey.shade200,
+                    color: canChange ? Colors.amber.shade100 : Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   alignment: Alignment.center,
@@ -737,7 +725,7 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                     children: [
                       Text(
                         DateFormat('MM/dd').format(date),
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: canChange ? Colors.amber.shade800 : canRecheck ? Colors.red.shade700 : Colors.grey.shade600),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: canChange ? Colors.amber.shade800 : Colors.grey.shade600),
                       ),
                       const SizedBox(height: 2),
                       Container(
@@ -755,6 +743,19 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                           ),
                         ),
                       ),
+                      if (isAdminOnlySchedule)
+                        Container(
+                          margin: const EdgeInsets.only(top: 1),
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade50,
+                            borderRadius: BorderRadius.circular(3),
+                          ),
+                          child: Text(
+                            strs.adminOnlyShort,
+                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.purple.shade700),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -766,24 +767,22 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                     children: [
                       Text(
                         '${DateFormat('E', strs.isEnglish ? null : 'ko').format(date)} $startTime~$endTime',
-                        style: TextStyle(fontSize: 13, color: canChange ? Colors.amber.shade900 : canRecheck ? Colors.red.shade700 : Colors.grey.shade500),
+                        style: TextStyle(fontSize: 13, color: canChange ? Colors.amber.shade900 : Colors.grey.shade500),
                       ),
                       if (canChange)
                         Text(strs.tapToChange, style: TextStyle(fontSize: 11, color: Colors.amber.shade700)),
-                      if (canRecheck)
-                        Text(strs.tapToReapply, style: TextStyle(fontSize: 11, color: Colors.red.shade600)),
                     ],
                   ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: canChange ? Colors.amber.shade100 : canRecheck ? Colors.red.shade100 : Colors.grey.shade200,
+                    color: canChange ? Colors.amber.shade100 : Colors.grey.shade200,
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    canChange ? strs.changeAvailable : canRecheck ? strs.changeAvailable : strs.notApplied,
-                    style: TextStyle(fontSize: 12, color: canChange ? Colors.amber.shade800 : canRecheck ? Colors.red.shade700 : Colors.grey.shade500),
+                    canChange ? strs.changeAvailable : strs.notApplied,
+                    style: TextStyle(fontSize: 12, color: canChange ? Colors.amber.shade800 : Colors.grey.shade500),
                   ),
                 ),
               ],
@@ -858,6 +857,19 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                         ),
                       ),
                     ),
+                    if (isAdminOnlySchedule)
+                      Container(
+                        margin: const EdgeInsets.only(top: 1),
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.shade50,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                        child: Text(
+                          strs.adminOnlyShort,
+                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.purple.shade700),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -917,24 +929,6 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
                       border: Border.all(color: Colors.red.shade300),
                     ),
                     child: Text(strs.recheckNeeded, style: TextStyle(fontSize: 11, color: Colors.red.shade700, fontWeight: FontWeight.bold)),
-                  ),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    height: 24,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        minimumSize: Size.zero,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        textStyle: const TextStyle(fontSize: 12),
-                      ),
-                      onPressed: _isSubmitting
-                          ? null
-                          : () => _submitRecheckRequest(requestId, schedule),
-                      child: Text(strs.recheckApplyAction),
-                    ),
                   ),
                 ],
               ],
@@ -1106,83 +1100,6 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
           SnackBar(content: Text(strs.changeError), backgroundColor: Colors.red),
         );
       }
-    }
-  }
-
-  Future<void> _submitRecheckRequest(String failedRequestId, Map<String, dynamic> schedule) async {
-    final strs = CleaningInspectionStrings(
-        Provider.of<LocaleProvider>(context, listen: false).isEnglish);
-    // 처리 중 재진입(중복 신청) 방지
-    if (_isSubmitting) return;
-    // 퇴사청소 재검사도 서명이 있어야 한다.
-    final recheckType =
-        (schedule['inspectionType'] as String?) ?? widget.inspectionType;
-    if (!await _requireMoveOutSignature(recheckType)) return;
-    if (!mounted) return;
-    setState(() => _isSubmitting = true);
-    try {
-      final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
-      if (user == null) return;
-
-      // 같은 스케줄에서 재검사: 기존 신청서/평가 결과는 그대로 두고
-      // 이전 값(메모, 공동구역)을 복사한 새 신청서를 만들어 재평가를 받을 수 있게 함
-      final failedRequest = _requests.firstWhere(
-        (r) => r['_id'] == failedRequestId,
-        orElse: () => <String, dynamic>{},
-      );
-
-      final scheduleId = schedule['_id'] as String;
-      final dateVal = schedule['date'];
-      final scheduleDate = (dateVal is Timestamp) ? dateVal.toDate() : DateTime.now();
-      final startTime = (schedule['startTime'] ?? '') as String;
-      final endTime = (schedule['endTime'] ?? '') as String;
-
-      final batch = _firestore.batch();
-      final requestRef = _firestore.collection('cleaning_requests').doc();
-      batch.set(requestRef, {
-        'userId': user.uid,
-        'userName': user.name,
-        'roomNumber': user.roomNumber,
-        'building': user.building,
-        'dormBuilding': user.dormBuilding,
-        'scheduleId': scheduleId,
-        'inspectionType': (schedule['inspectionType'] as String?) ?? widget.inspectionType,
-        'availableDates': [Timestamp.fromDate(scheduleDate)],
-        'availableTimeSlot': '$startTime~$endTime',
-        'availableTimeSlotLabel': '${DateFormat('MM/dd').format(scheduleDate)} $startTime~$endTime',
-        'memo': failedRequest['memo'],
-        if (failedRequest['commonAreas'] != null) 'commonAreas': failedRequest['commonAreas'],
-        'status': 'pending',
-        'isRecheck': true,
-        'recheckOfRequestId': failedRequestId,
-        'createdAt': Timestamp.now(),
-        'updatedAt': Timestamp.now(),
-      });
-
-      final scheduleRef = _firestore.collection('cleaning_schedules').doc(scheduleId);
-      batch.update(scheduleRef, {'currentCount': FieldValue.increment(1)});
-      await batch.commit();
-
-      final updatedSchedule = await scheduleRef.get();
-      final updatedData = updatedSchedule.data();
-      if (updatedData != null && updatedData['currentCount'] >= updatedData['maxCapacity']) {
-        await scheduleRef.update({'status': 'full'});
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(strs.recheckSubmitted), backgroundColor: Colors.green),
-        );
-        _loadData();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(strs.requestSubmitError), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
     }
   }
 

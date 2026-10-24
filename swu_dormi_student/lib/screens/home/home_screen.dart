@@ -25,6 +25,7 @@ import '../message/floor_chat_screen.dart';
 import '../attendance/attendance_screen.dart';
 import '../attendance/my_qr_code_page.dart';
 import '../reservation/reservation_screen.dart';
+import '../alarm/alarm_screen.dart';
 import '../timetable/timetable_page.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -886,6 +887,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 navigator.pop();
                 if (!await _requireRegulationAgreement()) return;
                 navigator.push(MaterialPageRoute(builder: (context) => const ReservationScreen()));
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.alarm, color: Colors.indigo),
+              title: Text(s.menuAlarm),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (context) => const AlarmScreen()));
               },
             ),
             const Divider(height: 1),

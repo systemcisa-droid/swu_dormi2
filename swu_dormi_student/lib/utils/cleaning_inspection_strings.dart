@@ -26,6 +26,7 @@ class CleaningInspectionStrings {
   // 작은 배지용 축약 라벨 (고정폭 컨테이너에서 오버플로우 방지)
   String get moveOutInspectionShort => _t('퇴사검사', 'Move-out');
   String get monthlyInspectionShort => _t('월검사', 'Monthly');
+  String get adminOnlyShort => _t('기간외', 'Special');
 
   String get statusApplied => _t('신청완료', 'Applied');
   String get statusScheduled => _t('예정', 'Scheduled');
@@ -42,7 +43,6 @@ class CleaningInspectionStrings {
   String remainingRooms(int remaining, int max) => _t('잔여 $remaining/$max호실', '$remaining/$max rooms left');
 
   String get tapToChange => _t('탭하여 이 일정으로 변경', 'Tap to change to this schedule');
-  String get tapToReapply => _t('탭하여 재신청', 'Tap to reapply');
   String get changeAvailable => _t('변경가능', 'Changeable');
   String get notApplied => _t('미신청', 'Not Applied');
 
@@ -147,7 +147,5 @@ class CleaningInspectionStrings {
   String get requestSubmitError => _t('신청 중 오류가 발생했습니다. 다시 시도해주세요.', 'An error occurred while submitting the request. Please try again.');
 
   // ── 재검사 신청 ──
-  String get recheckApplyAction => _t('재검사 신청', 'Recheck');
-  String get recheckSubmitted => _t('재검사 신청이 완료되었습니다', 'Your recheck request has been submitted');
   String get recheckBadge => _t('재검사 신청', 'Recheck Request');
 }

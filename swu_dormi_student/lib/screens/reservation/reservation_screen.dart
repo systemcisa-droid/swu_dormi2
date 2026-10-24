@@ -35,12 +35,12 @@ const _kGlobalRooms = [
   _SeminarRoom('global_232', '국제생활관 232호'),
 ];
 
-// 샬롬하우스 125호는 매주 월요일 21:30~22:30에 예약할 수 없다 (고정 일정 사용).
-// 슬롯 43=21:30~22:00, 44=22:00~22:30 (endSlot은 기존 예약과 같이 포함 범위).
+// 샬롬하우스 125호는 매주 월요일 22:00~23:30에 예약할 수 없다 (고정 일정 사용).
+// 슬롯 44=22:00~22:30, 46=23:00~23:30 (endSlot은 기존 예약과 같이 포함 범위).
 const String _kBlockedRoomId = 'shalom_125';
 const int _kBlockedWeekday = DateTime.monday;
-const int _kBlockedStartSlot = 43;
-const int _kBlockedEndSlot = 44;
+const int _kBlockedStartSlot = 44;
+const int _kBlockedEndSlot = 46;
 
 bool _isRuleBlockedSlot(String roomId, int slotIndex, DateTime date) {
   return roomId == _kBlockedRoomId &&
@@ -124,7 +124,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
           myReservation = data;
         }
       }
-      // 요일·시간 고정 제한(예: 샬롬하우스 125호 월요일 21:30~22:30)을 이미 예약된 것처럼 병합한다.
+      // 요일·시간 고정 제한(예: 샬롬하우스 125호 월요일 22:00~23:30)을 이미 예약된 것처럼 병합한다.
       // 이렇게 하면 칸 색칠·탭 방지·범위 검증이 기존 예약과 동일한 로직으로 동작한다.
       for (final room in [..._kShalomRooms, ..._kGlobalRooms]) {
         for (int i = 0; i < _kTotalSlots; i++) {

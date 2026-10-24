@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/locale_provider.dart';
+import '../../services/server_clock.dart';
 import '../../utils/floor_chat_strings.dart';
 import 'chat_media.dart';
 import 'chat_upload.dart';
@@ -87,6 +88,13 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     super.initState();
     // build 이후 user 정보가 확정되면 읽음 처리 (build에서 호출하면 매 rebuild마다 실행됨)
     WidgetsBinding.instance.addPostFrameCallback((_) => _initRoom());
+    // 기기 시계가 어긋나 있어도(특히 해외 로밍 폰) 서버 시각 기준으로 이용 제한
+    // 시간을 판단하도록 동기화한다. 실패하면 기기 시각으로 계속 판단한다.
+    if (!ServerClock.isSynced) {
+      ServerClock.sync().then((_) {
+        if (mounted) setState(() {});
+      });
+    }
   }
 
   void _initRoom() {
@@ -168,13 +176,13 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     super.dispose();
   }
 
-  // 00:30 ~ 09:00 사용 불가
-  // ⚠️ 임시 해제 (사용자 요청) — 몇 시간 후 아래 원본 로직으로 복귀할 것.
+  // 00:30 ~ 09:00 사용 불가.
+  // 기기 로컬 시각(TimeOfDay.now())은 폰 시간대·시계 설정에 따라 조작/오차가 생길 수
+  // 있어(예: 해외 로밍 중인 폰), 층장앱 QR 체크와 동일하게 서버 시각을 기준으로 삼는다.
   bool _isRestrictedTime() {
-    return false;
-    // final now = TimeOfDay.now();
-    // final minutes = now.hour * 60 + now.minute;
-    // return minutes >= 30 && minutes < 9 * 60;
+    final now = ServerClock.now().toSeoul();
+    final minutes = now.hour * 60 + now.minute;
+    return minutes >= 30 && minutes < 9 * 60;
   }
 
   /// 첨부(사진/영상) 선택 → 압축 → 업로드 → 메시지 전송
@@ -290,6 +298,242 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
         ),
       ),
     );
+  }
+
+  /// 메시지를 클립보드로 복사한다.
+  void _copyMessageText(String text) {
+    if (text.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(_s.messageCopied), duration: const Duration(seconds: 1)),
+    );
+  }
+
+  /// 긴 메시지 메뉴에 쓰는 간단 이모티콘 반응 모음.
+  static const _kReactionEmojis = ['❤️', '👍', '✅', '😂', '😮', '😢'];
+
+  /// 카카오톡처럼 메시지를 길게 누르면 그 자리에 이모티콘 반응·복사·공지·수정·삭제 메뉴를 띄운다.
+  /// 답장은 메뉴가 아니라 메시지를 좌측으로 스와이프해서 보낸다.
+  Future<void> _showMessageMenu(
+    Offset globalPosition,
+    String text, {
+    VoidCallback? onDelete,
+    ValueChanged<String>? onReact,
+    VoidCallback? onPin,
+    VoidCallback? onEdit,
+  }) async {
+    HapticFeedback.selectionClick();
+    final s = _s;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        globalPosition & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: Colors.white,
+      items: [
+        if (onReact != null)
+          PopupMenuItem<String>(
+            enabled: false,
+            padding: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: _kReactionEmojis
+                    .map((emoji) => GestureDetector(
+                          onTap: () => Navigator.of(context).pop('react:$emoji'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ),
+          ),
+        if (text.isNotEmpty) PopupMenuItem(value: 'copy', child: Text(s.menuCopy)),
+        if (text.isNotEmpty) PopupMenuItem(value: 'select_copy', child: Text(s.menuSelectCopy)),
+        if (onPin != null) PopupMenuItem(value: 'pin', child: Text(s.menuPin)),
+        if (onEdit != null) PopupMenuItem(value: 'edit', child: Text(s.menuEdit)),
+        if (onDelete != null)
+          PopupMenuItem(
+            value: 'delete',
+            child: Text(s.menuDelete, style: const TextStyle(color: Colors.red)),
+          ),
+      ],
+    );
+    if (selected == null) return;
+    if (selected.startsWith('react:')) {
+      onReact?.call(selected.substring(6));
+      return;
+    }
+    switch (selected) {
+      case 'copy':
+        _copyMessageText(text);
+        break;
+      case 'select_copy':
+        _showSelectableText(text);
+        break;
+      case 'pin':
+        onPin?.call();
+        break;
+      case 'edit':
+        onEdit?.call();
+        break;
+      case 'delete':
+        onDelete?.call();
+        break;
+    }
+  }
+
+  /// "선택 복사" — 메시지 전체를 바로 클립보드에 넣는 대신, 원하는 부분만 골라 복사할 수 있게
+  /// 선택 가능한 텍스트로 띄워준다.
+  void _showSelectableText(String text) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: SelectableText(text, style: const TextStyle(fontSize: 15, height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(_s.close)),
+        ],
+      ),
+    );
+  }
+
+  /// 메시지를 채팅방 상단 공지로 등록한다. 해제는 상단 배너의 닫기 버튼으로 한다.
+  Future<void> _pinNotice(String roomId, String senderName, String text) async {
+    if (text.isEmpty) return;
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+    try {
+      await _firestore.collection('floor_chats').doc(roomId).set({
+        'pinnedMessage': {
+          'text': text,
+          'senderName': senderName,
+          'pinnedByName': user?.name ?? '',
+          'pinnedAt': Timestamp.now(),
+        },
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  Future<void> _unpinNotice(String roomId) async {
+    try {
+      await _firestore
+          .collection('floor_chats')
+          .doc(roomId)
+          .update({'pinnedMessage': FieldValue.delete()});
+    } catch (_) {}
+  }
+
+  /// 본인이 보낸 메시지의 내용을 수정한다.
+  Future<void> _editMessage(DocumentReference<Object?> ref, String currentText) async {
+    final s = _s;
+    final controller = TextEditingController(text: currentText);
+    final newText = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.editMessageTitle),
+        content: TextField(controller: controller, maxLines: 4, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.cancel)),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: Text(s.save),
+          ),
+        ],
+      ),
+    );
+    if (newText == null || newText.isEmpty || newText == currentText) return;
+    try {
+      await ref.update({'text': newText, 'edited': true, 'editedAt': Timestamp.now()});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.editError(e))));
+      }
+    }
+  }
+
+  /// 메시지에 달린 이모티콘 반응을 종류별로 묶어 보여준다. 탭하면 내 반응을 토글한다.
+  Widget _buildReactionsRow(Map<String, dynamic> reactions, ValueChanged<String>? onReact) {
+    final myUid = Provider.of<AuthProvider>(context, listen: false).currentUser?.uid;
+    final counts = <String, int>{};
+    for (final v in reactions.values) {
+      final emoji = v as String;
+      counts[emoji] = (counts[emoji] ?? 0) + 1;
+    }
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: counts.entries.map((entry) {
+        final mine = myUid != null && reactions[myUid] == entry.key;
+        return GestureDetector(
+          onTap: onReact == null ? null : () => onReact(entry.key),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: mine ? Colors.cyan.shade50 : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: mine ? Colors.cyan.shade300 : Colors.grey.shade300),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(entry.key, style: const TextStyle(fontSize: 12)),
+                if (entry.value > 1) ...[
+                  const SizedBox(width: 3),
+                  Text('${entry.value}',
+                      style: TextStyle(
+                          fontSize: 10, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
+                ],
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  /// 같은 이모티콘을 다시 누르면 반응을 취소하고, 다른 이모티콘을 누르면 교체한다(1인당 1개).
+  Future<void> _toggleReaction(DocumentReference<Object?> ref, String emoji) async {
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+    if (user == null) return;
+    HapticFeedback.selectionClick();
+    try {
+      final doc = await ref.get();
+      final data = doc.data() as Map<String, dynamic>?;
+      final current = (data?['reactions'] as Map?)?[user.uid] as String?;
+      await ref.update({
+        'reactions.${user.uid}': current == emoji ? FieldValue.delete() : emoji,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _confirmDeleteMessage(DocumentReference<Object?> ref) async {
+    final s = _s;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.deleteMessageTitle),
+        content: Text(s.deleteMessageConfirm),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(s.cancel)),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.menuDelete, style: const TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await ref.delete();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(s.deleteError(e))));
+      }
+    }
   }
 
   Future<void> _send(String roomId, String senderName, String roomNumber) async {
@@ -433,6 +677,7 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                     ],
                   ),
                 ),
+                _buildPinnedNoticeBanner(roomId),
                 // 채팅방에 있는 학생 이름
                 if (_memberNames.isNotEmpty)
                   Container(
@@ -550,6 +795,8 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
             final mediaUrl = data['mediaUrl'] as String?;
             final mediaType = data['mediaType'] as String?;
             final replyTo = data['replyTo'] as Map<String, dynamic>?;
+            final reactions = (data['reactions'] as Map?)?.cast<String, dynamic>();
+            final edited = data['edited'] == true;
             // 안 읽은 사람 수 = 참여자 수 - 읽은 사람 수
             final readBy = (data['readBy'] as List<dynamic>?) ?? const [];
             final unreadCount = _memberCount > 0
@@ -619,11 +866,60 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                   mediaType: mediaType,
                   unreadCount: unreadCount,
                   replyTo: replyTo,
+                  reactions: reactions,
+                  edited: edited,
                   onSwipeReply: () => _setReplyTarget(data),
+                  onDelete: isMine ? () => _confirmDeleteMessage(docs[index].reference) : null,
+                  onReact: (emoji) => _toggleReaction(docs[index].reference, emoji),
+                  onPin: text.isNotEmpty ? () => _pinNotice(roomId, senderName, text) : null,
+                  onEdit: isMine && text.isNotEmpty
+                      ? () => _editMessage(docs[index].reference, text)
+                      : null,
                 ),
               ],
             );
           },
+        );
+      },
+    );
+  }
+
+  /// "공지"로 등록된 메시지를 채팅방 상단에 고정 배너로 보여준다.
+  Widget _buildPinnedNoticeBanner(String roomId) {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestore.collection('floor_chats').doc(roomId).snapshots(),
+      builder: (context, snap) {
+        final roomData = snap.data?.data() as Map<String, dynamic>?;
+        final pinned = roomData?['pinnedMessage'] as Map<String, dynamic>?;
+        if (pinned == null) return const SizedBox.shrink();
+        final pinnedText = (pinned['text'] as String?) ?? '';
+        if (pinnedText.isEmpty) return const SizedBox.shrink();
+        final pinnedSender = (pinned['senderName'] as String?) ?? '';
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          color: Colors.amber.shade50,
+          child: Row(
+            children: [
+              Icon(Icons.campaign, size: 16, color: Colors.amber.shade800),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '$pinnedSender: $pinnedText',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.amber.shade900,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+              GestureDetector(
+                onTap: () => _unpinNotice(roomId),
+                child: Icon(Icons.close, size: 16, color: Colors.amber.shade800),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -656,7 +952,13 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
     String? mediaType,
     int unreadCount = 0,
     Map<String, dynamic>? replyTo,
+    Map<String, dynamic>? reactions,
+    bool edited = false,
     VoidCallback? onSwipeReply,
+    VoidCallback? onDelete,
+    ValueChanged<String>? onReact,
+    VoidCallback? onPin,
+    VoidCallback? onEdit,
   }) {
     final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
     final bubbleColor = isMine ? Colors.cyan.shade500 : Colors.white;
@@ -727,6 +1029,10 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                     ),
                     const SizedBox(width: 6),
                   ],
+                  Column(
+                    crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                   ConstrainedBox(
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.62,
@@ -738,7 +1044,16 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                             isVideo: mediaType == 'video',
                             maxWidth: MediaQuery.of(context).size.width * 0.62,
                           )
-                        : Container(
+                        : GestureDetector(
+                            onLongPressStart: (details) => _showMessageMenu(
+                              details.globalPosition,
+                              text,
+                              onDelete: onDelete,
+                              onReact: onReact,
+                              onPin: onPin,
+                              onEdit: onEdit,
+                            ),
+                            child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 10),
                             decoration: BoxDecoration(
@@ -768,14 +1083,36 @@ class _FloorChatScreenState extends State<FloorChatScreen> {
                                   _buildReplyQuote(replyTo, isMine),
                                   const SizedBox(height: 6),
                                 ],
-                                Text(text,
+                                Text.rich(
+                                  TextSpan(
+                                    text: text,
                                     style: TextStyle(
                                         fontSize: 14,
                                         color: textColor,
-                                        height: 1.4)),
+                                        height: 1.4),
+                                    children: edited
+                                        ? [
+                                            TextSpan(
+                                              text: ' ${_s.editedLabel}',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: textColor.withValues(alpha: 0.65)),
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                ),
                               ],
                             ),
+                            ),
                           ),
+                  ),
+                  if (reactions != null && reactions.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: _buildReactionsRow(reactions, onReact),
+                    ),
+                    ],
                   ),
                   if (!isMine) ...[
                     const SizedBox(width: 6),

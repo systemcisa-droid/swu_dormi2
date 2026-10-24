@@ -14,6 +14,8 @@ import 'screens/auth/privacy_consent_screen.dart';
 import 'screens/auth/google_student_id_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'utils/constants.dart';
+import 'utils/navigation_service.dart';
+import 'services/alarm_service.dart';
 
 // 백그라운드 메시지 핸들러 — Flutter 플러그인 사용 불가, Firebase만 초기화
 @pragma('vm:entry-point')
@@ -42,6 +44,9 @@ void main() async {
   // 백그라운드 메시지 핸들러 등록
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
+  // 알람 서비스 초기화 (알림 탭으로 앱이 시작된 경우 알람 울림 화면으로 이동)
+  await AlarmService().init();
+
   runApp(const MyApp());
 }
 
@@ -56,6 +61,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LocaleProvider()..load()),
       ],
       child: MaterialApp(
+        navigatorKey: navigatorKey,
         title: AppConstants.appName,
         debugShowCheckedModeBanner: false,
         builder: (context, child) {
