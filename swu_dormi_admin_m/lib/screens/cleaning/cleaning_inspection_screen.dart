@@ -567,15 +567,19 @@ class _CleaningInspectionContentState
                         Row(
                           children: [
                             // 날짜 박스
+                            // 높이를 고정값(52)으로 두면 '기간외' 뱃지 등으로 줄 수가
+                            // 늘어날 때 RenderFlex가 넘쳐버리므로 최소 높이만 지정한다.
                             Container(
                               width: 52,
-                              height: 52,
+                              constraints: const BoxConstraints(minHeight: 52),
+                              padding: const EdgeInsets.symmetric(vertical: 4),
                               decoration: BoxDecoration(
                                 color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
                                     date != null ? DateFormat('MM/dd').format(date) : '--',
@@ -591,6 +595,26 @@ class _CleaningInspectionContentState
                                       style: TextStyle(
                                         fontSize: 11,
                                         color: Theme.of(context).primaryColor,
+                                      ),
+                                    ),
+                                  // 신청기간이 지나면 우측 상태 뱃지가 '신청만료'로 바뀌어
+                                  // 기간외신청 일정이라는 표시가 사라지므로, 날짜 박스에
+                                  // 상태와 무관하게 항상 남는 표시를 따로 둔다.
+                                  if (isAdminOnlySchedule)
+                                    Container(
+                                      margin: const EdgeInsets.only(top: 2),
+                                      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                                      decoration: BoxDecoration(
+                                        color: Colors.deepPurple.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(3),
+                                      ),
+                                      child: const Text(
+                                        '기간외',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.deepPurple,
+                                        ),
                                       ),
                                     ),
                                 ],
@@ -713,7 +737,8 @@ class _CleaningInspectionContentState
                                 PopupMenuButton<String>(
                                   onSelected: (value) {
                                     if (value == 'edit') {
-                                      _showEditTimeDialog(doc.id, date, startTime, endTime);
+                                      _showEditTimeDialog(
+                                          doc.id, date, startTime, endTime, applyStart, deadline);
                                     } else if (value == 'delete') {
                                       _deleteSchedule(doc.id);
                                     }
@@ -984,6 +1009,8 @@ class _CleaningInspectionContentState
                     }
                   } else if (value == 'edit') {
                     _showEvaluateDialog(doc.id, data);
+                  } else if (value == 'recheck') {
+                    _createRecheckRequest(doc.id, data);
                   } else if (value == 'reject') {
                     _rejectRequest(doc.id);
                   } else if (value == 'delete') {
@@ -1021,6 +1048,20 @@ class _CleaningInspectionContentState
                         Icon(Icons.edit, color: Colors.blue, size: 18),
                         SizedBox(width: 8),
                         Text('평가 수정'),
+                      ]),
+                    ),
+                  if (status == 'completed' &&
+                      needsRecheck &&
+                      !_requests.any((d) {
+                        final dd = d.data() as Map<String, dynamic>;
+                        return dd['recheckOfRequestId'] == doc.id;
+                      }))
+                    const PopupMenuItem(
+                      value: 'recheck',
+                      child: Row(children: [
+                        Icon(Icons.replay_circle_filled, color: Colors.red, size: 18),
+                        SizedBox(width: 8),
+                        Text('재검사 실행', style: TextStyle(color: Colors.red)),
                       ]),
                     ),
                   const PopupMenuItem(
@@ -1753,17 +1794,29 @@ class _CleaningInspectionContentState
   }
 
   Future<void> _showEditTimeDialog(
-      String scheduleId, DateTime? currentDate, String currentStart, String currentEnd) async {
+      String scheduleId,
+      DateTime? currentDate,
+      String currentStart,
+      String currentEnd,
+      DateTime? currentApplyStart,
+      DateTime? currentDeadline) async {
     DateTime selectedDate = currentDate ?? DateTime.now();
     final startCtrl = TextEditingController(text: currentStart);
     final endCtrl = TextEditingController(text: currentEnd);
+    DateTime applyStartDate = currentApplyStart ?? DateTime.now();
+    final applyStartTimeCtrl = TextEditingController(
+        text: currentApplyStart != null ? DateFormat('HH:mm').format(currentApplyStart) : '00:00');
+    DateTime deadlineDate = currentDeadline ?? DateTime.now();
+    final deadlineTimeCtrl = TextEditingController(
+        text: currentDeadline != null ? DateFormat('HH:mm').format(currentDeadline) : '23:00');
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
           title: const Text('날짜 및 시간 수정'),
-          content: Column(
+          content: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1813,7 +1866,106 @@ class _CleaningInspectionContentState
                   hintText: '예: 12:00',
                 ),
               ),
+              const SizedBox(height: 20),
+              const Divider(),
+              const SizedBox(height: 8),
+              const Text('신청 시작', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: applyStartDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2030),
+                        );
+                        if (picked != null) setDialogState(() => applyStartDate = picked);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade400),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.event, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              DateFormat('MM/dd').format(applyStartDate),
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 80,
+                    child: TextField(
+                      controller: applyStartTimeCtrl,
+                      decoration: const InputDecoration(
+                        hintText: 'HH:MM',
+                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              const Text('신청 기한(마감)', style: TextStyle(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: deadlineDate,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2030),
+                        );
+                        if (picked != null) setDialogState(() => deadlineDate = picked);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade400),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.event, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              DateFormat('MM/dd').format(deadlineDate),
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    width: 80,
+                    child: TextField(
+                      controller: deadlineTimeCtrl,
+                      decoration: const InputDecoration(
+                        hintText: 'HH:MM',
+                        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1831,6 +1983,18 @@ class _CleaningInspectionContentState
 
     if (confirmed != true) return;
     try {
+      final asParts = applyStartTimeCtrl.text.trim().split(':');
+      final asHour = int.tryParse(asParts.isNotEmpty ? asParts[0] : '0') ?? 0;
+      final asMinute = int.tryParse(asParts.length > 1 ? asParts[1] : '0') ?? 0;
+      final applyStart = DateTime(
+          applyStartDate.year, applyStartDate.month, applyStartDate.day, asHour, asMinute);
+
+      final dlParts = deadlineTimeCtrl.text.trim().split(':');
+      final dlHour = int.tryParse(dlParts.isNotEmpty ? dlParts[0] : '23') ?? 23;
+      final dlMinute = int.tryParse(dlParts.length > 1 ? dlParts[1] : '59') ?? 59;
+      final deadline = DateTime(
+          deadlineDate.year, deadlineDate.month, deadlineDate.day, dlHour, dlMinute);
+
       await _firestore
           .collection('cleaning_schedules')
           .doc(scheduleId)
@@ -1838,6 +2002,8 @@ class _CleaningInspectionContentState
         'date': Timestamp.fromDate(selectedDate),
         'startTime': startCtrl.text.trim(),
         'endTime': endCtrl.text.trim(),
+        'applicationStart': Timestamp.fromDate(applyStart),
+        'applicationDeadline': Timestamp.fromDate(deadline),
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2676,6 +2842,88 @@ class _CleaningInspectionContentState
       });
     } catch (e) {
       debugPrint('퇴사검사 통과 후 상태 변경 실패: $e');
+    }
+  }
+
+  /// 재검사 필요 판정을 받은 신청에 대해, 층장이 직접 재검사를 실행한다.
+  /// 기존엔 학생이 직접 재신청하는 구조였으나, 이제 층장이 현장에서 바로 다시
+  /// 점검하고 새 pending 신청을 만들어 그 자리에서 평가할 수 있게 한다.
+  Future<void> _createRecheckRequest(
+    String failedRequestId,
+    Map<String, dynamic> failedData,
+  ) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('재검사 실행'),
+        content: const Text('이 학생에 대한 재검사를 새로 등록하시겠습니까?\n등록 후 바로 점검 평가를 진행할 수 있습니다.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('재검사 등록'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
+      final scheduleId = (failedData['scheduleId'] ?? '') as String;
+      QueryDocumentSnapshot? scheduleDoc;
+      for (final s in _schedules) {
+        if (s.id == scheduleId) {
+          scheduleDoc = s;
+          break;
+        }
+      }
+      final scheduleData = scheduleDoc?.data() as Map<String, dynamic>?;
+
+      final batch = _firestore.batch();
+      final requestRef = _firestore.collection('cleaning_requests').doc();
+      batch.set(requestRef, {
+        'userId': failedData['userId'],
+        'userName': failedData['userName'],
+        'roomNumber': failedData['roomNumber'],
+        'building': failedData['building'],
+        'dormBuilding': failedData['dormBuilding'],
+        'scheduleId': scheduleId,
+        'inspectionType': failedData['inspectionType'] ?? widget.inspectionType,
+        if (scheduleData != null) ...{
+          'availableTimeSlot':
+              '${scheduleData['startTime'] ?? ''}~${scheduleData['endTime'] ?? ''}',
+        },
+        'memo': failedData['memo'],
+        if (failedData['commonAreas'] != null) 'commonAreas': failedData['commonAreas'],
+        'status': 'pending',
+        'isRecheck': true,
+        'recheckOfRequestId': failedRequestId,
+        'createdAt': Timestamp.now(),
+        'updatedAt': Timestamp.now(),
+      });
+      if (scheduleId.isNotEmpty) {
+        batch.update(
+          _firestore.collection('cleaning_schedules').doc(scheduleId),
+          {'currentCount': FieldValue.increment(1)},
+        );
+      }
+      await batch.commit();
+
+      await Future.wait([_loadRequests(), _loadSchedules()]);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('재검사가 등록되었습니다. 점검 평가를 진행해주세요'), backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('오류: $e'), backgroundColor: Colors.red),
+        );
+      }
     }
   }
 

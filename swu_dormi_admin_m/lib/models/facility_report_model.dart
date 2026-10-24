@@ -82,7 +82,7 @@ class FacilityReportModel {
   String getCategoryDisplayName() {
     switch (category) {
       case 'maintenance': return '가구/도어';
-      case 'plumbing': return '수도설비';
+      case 'plumbing': return '수도/냉난방';
       case 'electrical': return '전기';
       case 'common_area': return '공동구역(헬스장, 기도실 등)';
       case 'other': return '기타';

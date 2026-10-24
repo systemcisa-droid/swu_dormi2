@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../services/server_clock.dart';
@@ -209,9 +210,11 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     } catch (_) {}
   }
 
-  /// 구역 문자열(예: '국제생활관 A동 2층')에서 기숙사 건물명을 뽑는다.
-  static String? _dormBuildingOf(String floor) =>
-      floor.contains('방학') ? '샬롬하우스(방학)' : floor.split(' ').firstOrNull;
+  /// 구역 문자열(예: '국제생활관 A동 2층', '국제생활관(방학) A동 1층')에서
+  /// 기숙사 건물명을 뽑는다. 첫 토큰에 이미 '(방학)'이 붙어 있으므로 그대로 쓰면 된다
+  /// ('방학'이 붙었다고 무조건 '샬롬하우스(방학)'로 단정하면 국제생활관(방학) 구역이
+  /// 잘못 분류된다).
+  static String? _dormBuildingOf(String floor) => floor.split(' ').firstOrNull;
 
   void _updateRoomUnregisteredStudents(
     String? roomNumber, {
@@ -300,11 +303,16 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
       });
 
       // 이벤트별 출석 카운트 집계 (화재대피용 1차 스캔만 한 미완료 기록은 제외)
+      // 이벤트 종료 시 _archiveManualStatuses가 관리자/층장 상태(외박 등)를
+      // 'recordType': 'status'인 별도 기록으로 남기는데, 이는 실제 인원점검(QR 체크)이
+      // 아니므로 카운트에서 제외한다. 안 그러면 같은 학생이 QR 체크 기록과 상태 기록으로
+      // 두 번 잡혀 총원(56명)보다 많은 인원(예: 58명)이 확인된 것처럼 보인다.
       final recordsSnap = await _firestore.collection('attendance_records').get();
       final counts = <String, int>{};
       for (final doc in recordsSnap.docs) {
         final data = doc.data();
         if (data['isComplete'] == false) continue;
+        if (data['recordType'] == 'status') continue;
         final eid = data['eventId'] as String?;
         if (eid != null) counts[eid] = (counts[eid] ?? 0) + 1;
       }
@@ -759,6 +767,13 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                       });
                       return;
                     }
+                    if (isSelected) {
+                      // 이미 펼쳐진 카드를 다시 누르면 접는다.
+                      _recordsSubscription?.cancel();
+                      _recordsSubscription = null;
+                      setState(() => _selectedEventId = null);
+                      return;
+                    }
                     _loadRecords(eventId);
                   },
                   borderRadius: BorderRadius.circular(12),
@@ -800,7 +815,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
-                                isFireDrill ? '화재대피훈련' : '일반 인원점검',
+                                isFireDrill ? '화재대피훈련' : '인원점검',
                                 style: TextStyle(
                                   color: isFireDrill ? Colors.red : Colors.blue,
                                   fontWeight: FontWeight.bold,
@@ -1183,7 +1198,8 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                 final floorStatus = _floorStatuses[uid];
                 final floorStatusSetBy = _floorStatusSetBy[uid];
                 final hasAdminStatus = adminStatus != null && adminStatus.isNotEmpty;
-                final adminStatusColor = _statusColors[adminStatus] ?? Colors.grey;
+                // 이 배지는 항상 '외박완료' 또는 '불참인정완료'만 표시하므로 고정 빨강으로 표시한다.
+                const adminStatusColor = Colors.red;
                 final floorStatusColor = _statusColors[floorStatus] ?? Colors.grey;
                 final remark = _remarks[uid];
 
@@ -1328,7 +1344,7 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
                                         color: adminStatusColor.withValues(alpha: 0.5)),
                                   ),
                                   child: Text(
-                                    '불참인정완료',
+                                    isFireDrillEvent ? '불참인정완료' : '외박완료',
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
@@ -1608,42 +1624,6 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
     );
   }
 
-  /// QR 체크가 기록되면 그 학생 호실의 층장 단톡방에 알림 메시지를 남긴다.
-  /// 출석 처리와는 별개이므로 실패해도 스캔 결과에는 영향을 주지 않는다.
-  Future<void> _postCheckInToRoomChat({
-    required Map<String, dynamic> student,
-    required String studentName,
-    required String eventTitle,
-    required String stageLabel,
-  }) async {
-    final captainUid = FirebaseAuth.instance.currentUser?.uid;
-    final dorm = student['dormBuilding'] as String? ?? '';
-    final wing = student['building'] as String? ?? '';
-    final room = student['roomNumber'] as String? ?? '';
-    if (captainUid == null || dorm.isEmpty || room.isEmpty || room == '000') return;
-    // message_screen.dart의 _toRoomId와 같은 규칙 (바롬인성교육관은 동 구분이 없다).
-    final roomId = wing.isEmpty ? '${dorm}_$room호' : '${dorm}_${wing}_$room호';
-    final text = '[인원점검] $studentName($room호) $stageLabel · $eventTitle';
-    try {
-      final chat = _firestore.collection('floor_chats').doc(roomId);
-      await chat.collection('messages').add({
-        'text': text,
-        'senderId': captainUid,
-        'senderName': '층장(${_assignedFloor ?? ''})',
-        'roomNumber': '층장',
-        'createdAt': FieldValue.serverTimestamp(),
-        'readBy': [captainUid],
-      });
-      await chat.set({
-        'lastMessage': text,
-        'lastAt': FieldValue.serverTimestamp(),
-        'roomId': roomId,
-      }, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('인원점검 단톡방 알림 실패: $e');
-    }
-  }
-
   /// 학생 QR("student:{studentId}")을 스캔한 결과를 검증하고 출석 기록을 남긴다.
   /// 반환값은 스캐너 화면에 보여줄 결과 메시지(성공 시 학생 이름, 실패 시 오류 메시지)이다.
   ///
@@ -1797,12 +1777,6 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
         batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
         await batch.commit();
 
-        _postCheckInToRoomChat(
-          student: student,
-          studentName: studentName,
-          eventTitle: (eventData['title'] as String?) ?? '인원점검',
-          stageLabel: '인원점검 완료',
-        );
         _loadEvents(showLoading: false);
         if (_selectedEventId == eventId) {
           _loadRecords(eventId);
@@ -1835,12 +1809,6 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           'isFireDrill': true,
         });
 
-        _postCheckInToRoomChat(
-          student: student,
-          studentName: studentName,
-          eventTitle: (eventData['title'] as String?) ?? '인원점검',
-          stageLabel: '1차(대피 시작) 확인',
-        );
         _loadEvents(showLoading: false);
         if (_selectedEventId == eventId) {
           _loadRecords(eventId);
@@ -1863,12 +1831,6 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
           batch.update(eventRef, {'attendeeCount': FieldValue.increment(1)});
           await batch.commit();
 
-          _postCheckInToRoomChat(
-            student: student,
-            studentName: studentName,
-            eventTitle: (eventData['title'] as String?) ?? '인원점검',
-            stageLabel: '2차(대피 도착) 확인 · 인원점검 완료',
-          );
           _loadEvents(showLoading: false);
           if (_selectedEventId == eventId) {
             _loadRecords(eventId);
@@ -1889,12 +1851,6 @@ class _AttendanceEventContentState extends State<_AttendanceEventContent> {
             'isFireDrill': true,
           });
 
-          _postCheckInToRoomChat(
-            student: student,
-            studentName: studentName,
-            eventTitle: (eventData['title'] as String?) ?? '인원점검',
-            stageLabel: '2차(대피 도착) 확인 (1차 미확인)',
-          );
           _loadEvents(showLoading: false);
           if (_selectedEventId == eventId) {
             _loadRecords(eventId);
@@ -2182,6 +2138,14 @@ class _QrScannerPageState extends State<_QrScannerPage> {
     super.dispose();
   }
 
+  // 진동 1번은 너무 짧고 잘 안 느껴진다는 피드백으로 3번 연속 울린다.
+  Future<void> _vibrateWarning() async {
+    for (var i = 0; i < 3; i++) {
+      HapticFeedback.vibrate();
+      if (i < 2) await Future.delayed(const Duration(milliseconds: 300));
+    }
+  }
+
   Future<void> _handleDetect(BarcodeCapture capture) async {
     if (_isProcessing) return;
     final barcode = capture.barcodes.firstOrNull;
@@ -2196,6 +2160,9 @@ class _QrScannerPageState extends State<_QrScannerPage> {
       _resultMessage = result.message;
       _resultSuccess = result.success;
     });
+    if (!result.success) {
+      _vibrateWarning();
+    }
 
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;

@@ -554,6 +554,7 @@ class _NavigationShellState extends State<NavigationShell> {
               label: '층장단톡방',
               selected: _currentIndex == 8,
               onTap: () => _navigateTo(8),
+              badgeCount: _totalUnreadMessages,
             ),
             _DrawerItem(
               icon: Icons.person,
@@ -575,12 +576,14 @@ class _DrawerItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final int badgeCount;
 
   const _DrawerItem({
     required this.icon,
     required this.label,
     required this.selected,
     required this.onTap,
+    this.badgeCount = 0,
   });
 
   @override
@@ -589,6 +592,21 @@ class _DrawerItem extends StatelessWidget {
     return ListTile(
       leading: Icon(icon, color: color),
       title: Text(label, style: TextStyle(color: color, fontWeight: selected ? FontWeight.bold : FontWeight.normal)),
+      trailing: badgeCount > 0
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.red,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+              child: Text(
+                badgeCount > 99 ? '99+' : '$badgeCount',
+                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+            )
+          : null,
       selected: selected,
       selectedTileColor: const Color(0xFFA6BF96).withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

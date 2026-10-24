@@ -3,7 +3,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 
-const _kWorkTypes = ['행정실 업무', '입사 업무', '관내 점검', '인원 점검', '화재 대피훈련'];
+const _kWorkTypes = [
+  '행정실 업무',
+  '관내 점검',
+  '입사 업무',
+  '퇴사 업무',
+  '월말 청소검사',
+  '인원 점검',
+  '화재 대피훈련',
+];
 
 /// 근무시간을 표시용 문자열로 변환한다.
 /// 22:00~24:00 심야 1.5배 가산으로 0.75시간처럼 소수점 둘째 자리가 필요한 값이 생기므로,

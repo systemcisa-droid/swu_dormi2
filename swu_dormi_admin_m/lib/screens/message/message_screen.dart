@@ -452,6 +452,284 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     }
   }
 
+  /// 긴 메시지 메뉴에 쓰는 간단 이모티콘 반응 모음.
+  static const _kReactionEmojis = ['❤️', '👍', '✅', '😂', '😮', '😢'];
+
+  /// 메시지를 클립보드로 복사한다.
+  void _copyMessageText(String text) {
+    if (text.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('메시지가 복사되었습니다'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  /// 카카오톡처럼 메시지를 길게 누르면 그 자리에 이모티콘 반응·복사·공지·수정·삭제(그리고
+  /// 타인 메시지면 신고/차단) 메뉴를 띄운다. 답장은 메뉴가 아니라 좌측 스와이프로 보낸다.
+  Future<void> _showMessageMenu(
+    Offset globalPosition,
+    String text, {
+    VoidCallback? onDelete,
+    ValueChanged<String>? onReact,
+    VoidCallback? onPin,
+    VoidCallback? onEdit,
+    VoidCallback? onModerate,
+  }) async {
+    HapticFeedback.selectionClick();
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(
+        globalPosition & const Size(1, 1),
+        Offset.zero & overlay.size,
+      ),
+      color: Colors.white,
+      items: [
+        if (onReact != null)
+          PopupMenuItem<String>(
+            enabled: false,
+            padding: EdgeInsets.zero,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: _kReactionEmojis
+                    .map((emoji) => GestureDetector(
+                          onTap: () => Navigator.of(context).pop('react:$emoji'),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            child: Text(emoji, style: const TextStyle(fontSize: 22)),
+                          ),
+                        ))
+                    .toList(),
+              ),
+            ),
+          ),
+        if (text.isNotEmpty) const PopupMenuItem(value: 'copy', child: Text('복사')),
+        if (text.isNotEmpty) const PopupMenuItem(value: 'select_copy', child: Text('선택 복사')),
+        if (onPin != null) const PopupMenuItem(value: 'pin', child: Text('공지')),
+        if (onEdit != null) const PopupMenuItem(value: 'edit', child: Text('수정')),
+        if (onDelete != null)
+          const PopupMenuItem(
+            value: 'delete',
+            child: Text('삭제', style: TextStyle(color: Colors.red)),
+          ),
+        if (onModerate != null)
+          const PopupMenuItem(value: 'moderate', child: Text('신고/차단')),
+      ],
+    );
+    if (selected == null) return;
+    if (selected.startsWith('react:')) {
+      onReact?.call(selected.substring(6));
+      return;
+    }
+    switch (selected) {
+      case 'copy':
+        _copyMessageText(text);
+        break;
+      case 'select_copy':
+        _showSelectableText(text);
+        break;
+      case 'pin':
+        onPin?.call();
+        break;
+      case 'edit':
+        onEdit?.call();
+        break;
+      case 'delete':
+        onDelete?.call();
+        break;
+      case 'moderate':
+        onModerate?.call();
+        break;
+    }
+  }
+
+  /// "선택 복사" — 메시지 전체를 바로 클립보드에 넣는 대신, 원하는 부분만 골라 복사할 수 있게
+  /// 선택 가능한 텍스트로 띄워준다.
+  void _showSelectableText(String text) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        content: SelectableText(text, style: const TextStyle(fontSize: 15, height: 1.4)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('닫기')),
+        ],
+      ),
+    );
+  }
+
+  /// 메시지를 채팅방 상단 공지로 등록한다. 해제는 상단 배너의 닫기 버튼으로 한다.
+  Future<void> _pinNotice(String senderName, String text) async {
+    if (text.isEmpty) return;
+    final me = FirebaseAuth.instance.currentUser;
+    try {
+      await _firestore.collection('floor_chats').doc(widget.roomId).set({
+        'pinnedMessage': {
+          'text': text,
+          'senderName': senderName,
+          'pinnedByName': me?.displayName ?? '',
+          'pinnedAt': Timestamp.now(),
+        },
+      }, SetOptions(merge: true));
+    } catch (_) {}
+  }
+
+  Future<void> _unpinNotice() async {
+    try {
+      await _firestore
+          .collection('floor_chats')
+          .doc(widget.roomId)
+          .update({'pinnedMessage': FieldValue.delete()});
+    } catch (_) {}
+  }
+
+  /// 본인이 보낸 메시지의 내용을 수정한다.
+  Future<void> _editMessage(DocumentReference<Object?> ref, String currentText) async {
+    final controller = TextEditingController(text: currentText);
+    final newText = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('메시지 수정'),
+        content: TextField(controller: controller, maxLines: 4, autofocus: true),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    if (newText == null || newText.isEmpty || newText == currentText) return;
+    try {
+      await ref.update({'text': newText, 'edited': true, 'editedAt': Timestamp.now()});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('수정 오류: $e')));
+      }
+    }
+  }
+
+  Future<void> _confirmDeleteMessage(DocumentReference<Object?> ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('메시지 삭제'),
+        content: const Text('이 메시지를 삭제하시겠습니까?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('삭제', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await ref.delete();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('삭제 오류: $e')));
+      }
+    }
+  }
+
+  /// 같은 이모티콘을 다시 누르면 반응을 취소하고, 다른 이모티콘을 누르면 교체한다(1인당 1개).
+  Future<void> _toggleReaction(DocumentReference<Object?> ref, String emoji) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    HapticFeedback.selectionClick();
+    try {
+      final doc = await ref.get();
+      final data = doc.data() as Map<String, dynamic>?;
+      final current = (data?['reactions'] as Map?)?[uid] as String?;
+      await ref.update({
+        'reactions.$uid': current == emoji ? FieldValue.delete() : emoji,
+      });
+    } catch (_) {}
+  }
+
+  /// 메시지에 달린 이모티콘 반응을 종류별로 묶어 보여준다. 탭하면 내 반응을 토글한다.
+  Widget _buildReactionsRow(Map<String, dynamic> reactions, ValueChanged<String>? onReact) {
+    final myUid = FirebaseAuth.instance.currentUser?.uid;
+    final counts = <String, int>{};
+    for (final v in reactions.values) {
+      final emoji = v as String;
+      counts[emoji] = (counts[emoji] ?? 0) + 1;
+    }
+    return Wrap(
+      spacing: 4,
+      runSpacing: 4,
+      children: counts.entries.map((entry) {
+        final mine = myUid != null && reactions[myUid] == entry.key;
+        return GestureDetector(
+          onTap: onReact == null ? null : () => onReact(entry.key),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: mine ? Colors.cyan.shade50 : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: mine ? Colors.cyan.shade300 : Colors.grey.shade300),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(entry.key, style: const TextStyle(fontSize: 12)),
+                if (entry.value > 1) ...[
+                  const SizedBox(width: 3),
+                  Text('${entry.value}',
+                      style: TextStyle(
+                          fontSize: 10, color: Colors.grey.shade700, fontWeight: FontWeight.bold)),
+                ],
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  /// "공지"로 등록된 메시지를 채팅방 상단에 고정 배너로 보여준다.
+  Widget _buildPinnedNoticeBanner() {
+    return StreamBuilder<DocumentSnapshot>(
+      stream: _firestore.collection('floor_chats').doc(widget.roomId).snapshots(),
+      builder: (context, snap) {
+        final roomData = snap.data?.data() as Map<String, dynamic>?;
+        final pinned = roomData?['pinnedMessage'] as Map<String, dynamic>?;
+        if (pinned == null) return const SizedBox.shrink();
+        final pinnedText = (pinned['text'] as String?) ?? '';
+        if (pinnedText.isEmpty) return const SizedBox.shrink();
+        final pinnedSender = (pinned['senderName'] as String?) ?? '';
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          color: Colors.amber.shade50,
+          child: Row(
+            children: [
+              Icon(Icons.campaign, size: 16, color: Colors.amber.shade800),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '$pinnedSender: $pinnedText',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12, color: Colors.amber.shade900, fontWeight: FontWeight.w600),
+                ),
+              ),
+              GestureDetector(
+                onTap: _unpinNotice,
+                child: Icon(Icons.close, size: 16, color: Colors.amber.shade800),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   /// 타인의 메시지를 길게 누르면 나오는 신고/차단 메뉴.
   /// App Store 가이드라인 1.2 요구사항(신고·차단 수단)을 충족한다.
   Future<void> _showModerationSheet({
@@ -1011,6 +1289,7 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
               ],
             ),
           ),
+          _buildPinnedNoticeBanner(),
           // 채팅방에 있는 학생 이름
           if (_memberNames.isNotEmpty)
             Container(
@@ -1111,6 +1390,8 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
             final mediaUrl = data['mediaUrl'] as String?;
             final mediaType = data['mediaType'] as String?;
             final replyTo = data['replyTo'] as Map<String, dynamic>?;
+            final reactions = (data['reactions'] as Map?)?.cast<String, dynamic>();
+            final edited = data['edited'] == true;
             // 안 읽은 사람 수 = 참여자 수 - 읽은 사람 수
             final readBy = (data['readBy'] as List<dynamic>?) ?? const [];
             final unreadCount = _memberCount > 0
@@ -1169,9 +1450,27 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                 if (dateDivider != null) _buildDateDivider(dateDivider),
                 _SwipeToReply(
                   onReply: () => _setReplyTarget(data),
-                  child: GestureDetector(
-                    // 타인의 메시지를 길게 눌러도 신고/차단 메뉴가 열린다.
-                    onLongPress: isMine || senderId == null
+                  child: _buildBubble(
+                    isMine: isMine,
+                    senderName: senderName,
+                    roomNumber: roomNumber,
+                    text: text,
+                    time: isLastOfGroup ? time : '',
+                    isFirstOfGroup: isFirstOfGroup,
+                    mediaUrl: mediaUrl,
+                    mediaType: mediaType,
+                    unreadCount: unreadCount,
+                    replyTo: replyTo,
+                    reactions: reactions,
+                    edited: edited,
+                    onReact: (emoji) => _toggleReaction(docs[index].reference, emoji),
+                    onPin: text.isNotEmpty ? () => _pinNotice(senderName, text) : null,
+                    onEdit: isMine && text.isNotEmpty
+                        ? () => _editMessage(docs[index].reference, text)
+                        : null,
+                    onDelete: isMine ? () => _confirmDeleteMessage(docs[index].reference) : null,
+                    // 타인 메시지에는 신고/차단 메뉴 버튼을 노출한다(가이드라인 1.2).
+                    onModerate: isMine || senderId == null
                         ? null
                         : () => _showModerationSheet(
                               messageId: docs[index].id,
@@ -1179,27 +1478,6 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                               senderName: senderName,
                               text: text,
                             ),
-                    child: _buildBubble(
-                      isMine: isMine,
-                      senderName: senderName,
-                      roomNumber: roomNumber,
-                      text: text,
-                      time: isLastOfGroup ? time : '',
-                      isFirstOfGroup: isFirstOfGroup,
-                      mediaUrl: mediaUrl,
-                      mediaType: mediaType,
-                      unreadCount: unreadCount,
-                      replyTo: replyTo,
-                      // 타인 메시지에는 신고/차단 메뉴 버튼을 노출한다.
-                      onModerate: isMine || senderId == null
-                          ? null
-                          : () => _showModerationSheet(
-                                messageId: docs[index].id,
-                                senderId: senderId,
-                                senderName: senderName,
-                                text: text,
-                              ),
-                    ),
                   ),
                 ),
               ],
@@ -1237,6 +1515,12 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
     String? mediaType,
     int unreadCount = 0,
     Map<String, dynamic>? replyTo,
+    Map<String, dynamic>? reactions,
+    bool edited = false,
+    ValueChanged<String>? onReact,
+    VoidCallback? onPin,
+    VoidCallback? onEdit,
+    VoidCallback? onDelete,
     VoidCallback? onModerate,
   }) {
     final hasMedia = mediaUrl != null && mediaUrl.isNotEmpty;
@@ -1300,6 +1584,10 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                     ),
                     const SizedBox(width: 6),
                   ],
+                  Column(
+                    crossAxisAlignment: isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                   ConstrainedBox(
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.62,
@@ -1311,7 +1599,17 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                             isVideo: mediaType == 'video',
                             maxWidth: MediaQuery.of(context).size.width * 0.62,
                           )
-                        : Container(
+                        : GestureDetector(
+                            onLongPressStart: (details) => _showMessageMenu(
+                              details.globalPosition,
+                              text,
+                              onDelete: onDelete,
+                              onReact: onReact,
+                              onPin: onPin,
+                              onEdit: onEdit,
+                              onModerate: onModerate,
+                            ),
+                            child: Container(
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 14, vertical: 10),
                             decoration: BoxDecoration(
@@ -1341,14 +1639,36 @@ class _RoomChatScreenState extends State<_RoomChatScreen> {
                                   _buildReplyQuote(replyTo, isMine),
                                   const SizedBox(height: 6),
                                 ],
-                                Text(text,
+                                Text.rich(
+                                  TextSpan(
+                                    text: text,
                                     style: TextStyle(
                                         fontSize: 14,
                                         color: textColor,
-                                        height: 1.4)),
+                                        height: 1.4),
+                                    children: edited
+                                        ? [
+                                            TextSpan(
+                                              text: ' (수정됨)',
+                                              style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: textColor.withValues(alpha: 0.65)),
+                                            ),
+                                          ]
+                                        : null,
+                                  ),
+                                ),
                               ],
                             ),
+                            ),
                           ),
+                  ),
+                  if (reactions != null && reactions.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: _buildReactionsRow(reactions, onReact),
+                    ),
+                    ],
                   ),
                   if (!isMine) ...[
                     const SizedBox(width: 6),
