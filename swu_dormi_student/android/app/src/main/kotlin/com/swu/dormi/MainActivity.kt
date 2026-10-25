@@ -4,6 +4,10 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -18,6 +22,8 @@ class MainActivity : FlutterActivity() {
     private var pendingAlarmId: Int? = null
     private var pendingSnoozeCount: Int = 0
     private var pendingWeekday: Int = 0
+    private var pendingRingtoneResult: MethodChannel.Result? = null
+    private var systemRingtonePlayer: MediaPlayer? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,40 +64,164 @@ class MainActivity : FlutterActivity() {
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
         methodChannel = channel
         channel.setMethodCallHandler { call, result ->
-            when (call.method) {
-                "scheduleAlarmClock" -> {
-                    val requestCode = call.argument<Int>("requestCode") ?: -1
-                    val triggerAtMillis = (call.argument<Number>("triggerAtMillis"))?.toLong() ?: 0L
-                    val alarmId = call.argument<Int>("alarmId") ?: -1
-                    val snoozeCount = call.argument<Int>("snoozeCount") ?: 0
-                    val weekday = call.argument<Int>("weekday") ?: 0
-                    scheduleAlarmClock(requestCode, triggerAtMillis, alarmId, snoozeCount, weekday)
-                    result.success(null)
-                }
-                "cancelAlarm" -> {
-                    val requestCode = call.argument<Int>("requestCode") ?: -1
-                    cancelAlarm(requestCode)
-                    result.success(null)
-                }
-                "getLaunchAlarm" -> {
-                    val id = pendingAlarmId
-                    if (id != null) {
-                        result.success(
-                            mapOf(
-                                "alarmId" to id,
-                                "snoozeCount" to pendingSnoozeCount,
-                                "weekday" to pendingWeekday,
-                            ),
-                        )
-                        pendingAlarmId = null
-                    } else {
+            try {
+                when (call.method) {
+                    "scheduleAlarmClock" -> {
+                        val requestCode = call.argument<Number>("requestCode")?.toInt() ?: -1
+                        val triggerAtMillis = call.argument<Number>("triggerAtMillis")?.toLong() ?: 0L
+                        val alarmId = call.argument<Number>("alarmId")?.toInt() ?: -1
+                        val snoozeCount = call.argument<Number>("snoozeCount")?.toInt() ?: 0
+                        val weekday = call.argument<Number>("weekday")?.toInt() ?: 0
+                        scheduleAlarmClock(requestCode, triggerAtMillis, alarmId, snoozeCount, weekday)
                         result.success(null)
                     }
+                    "cancelAlarm" -> {
+                        val requestCode = call.argument<Number>("requestCode")?.toInt() ?: -1
+                        cancelAlarm(requestCode)
+                        result.success(null)
+                    }
+                    "getLaunchAlarm" -> {
+                        val id = pendingAlarmId
+                        if (id != null) {
+                            result.success(
+                                mapOf(
+                                    "alarmId" to id,
+                                    "snoozeCount" to pendingSnoozeCount,
+                                    "weekday" to pendingWeekday,
+                                ),
+                            )
+                            pendingAlarmId = null
+                        } else {
+                            result.success(null)
+                        }
+                    }
+                    "pickSystemRingtone" -> {
+                        if (pendingRingtoneResult != null) {
+                            result.error("busy", "이미 선택 창이 열려 있습니다", null)
+                        } else {
+                            try {
+                                openRingtonePicker(call.argument<String>("currentUri"))
+                                pendingRingtoneResult = result
+                            } catch (e: Exception) {
+                                result.error(
+                                    "ringtone_picker_error",
+                                    "알람음 선택창을 열 수 없습니다: ${e.message}",
+                                    e.stackTraceToString(),
+                                )
+                            }
+                        }
+                    }
+                    "getRingtoneTitle" -> {
+                        val uriString = call.argument<String>("uri")
+                        result.success(if (uriString != null) ringtoneTitle(uriString) else null)
+                    }
+                    "getDefaultSystemRingtone" -> {
+                        // 알람 전용 기본음이 아니라, 사용자가 지금 쓰고 있는 전화 벨소리를 기본값으로 쓴다.
+                        val uri = RingtoneManager.getActualDefaultRingtoneUri(
+                            this,
+                            RingtoneManager.TYPE_RINGTONE,
+                        )
+                        if (uri != null) {
+                            val uriString = uri.toString()
+                            result.success(mapOf("uri" to uriString, "title" to ringtoneTitle(uriString)))
+                        } else {
+                            result.success(null)
+                        }
+                    }
+                    "playSystemRingtoneLoop" -> {
+                        val uriString = call.argument<String>("uri") ?: ""
+                        playSystemRingtoneLoop(uriString)
+                        result.success(null)
+                    }
+                    "stopSystemRingtoneLoop" -> {
+                        stopSystemRingtoneLoop()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
                 }
-                else -> result.notImplemented()
+            } catch (e: Exception) {
+                result.error("alarm_scheduler_error", e.message, e.stackTraceToString())
             }
         }
     }
+
+    // ───────────── 기기(시스템) 알람음 선택 ─────────────
+
+    private fun openRingtonePicker(currentUriString: String?) {
+        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+            putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_ALARM)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            putExtra(
+                RingtoneManager.EXTRA_RINGTONE_DEFAULT_URI,
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
+            )
+            if (currentUriString != null) {
+                putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(currentUriString))
+            }
+        }
+        @Suppress("DEPRECATION")
+        startActivityForResult(intent, REQUEST_CODE_RINGTONE_PICKER)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_CODE_RINGTONE_PICKER) return
+        val pendingResult = pendingRingtoneResult ?: return
+        pendingRingtoneResult = null
+        val uri = data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+        if (uri == null) {
+            pendingResult.success(null)
+            return
+        }
+        val uriString = uri.toString()
+        pendingResult.success(mapOf("uri" to uriString, "title" to ringtoneTitle(uriString)))
+    }
+
+    private fun ringtoneTitle(uriString: String): String? {
+        return try {
+            RingtoneManager.getRingtone(this, Uri.parse(uriString))?.getTitle(this)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun playSystemRingtoneLoop(uriString: String) {
+        stopSystemRingtoneLoop()
+        try {
+            val player = MediaPlayer()
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build(),
+            )
+            player.setDataSource(this, Uri.parse(uriString))
+            player.isLooping = true
+            player.setOnPreparedListener { it.start() }
+            player.prepareAsync()
+            systemRingtonePlayer = player
+        } catch (e: Exception) {
+            systemRingtonePlayer = null
+        }
+    }
+
+    private fun stopSystemRingtoneLoop() {
+        try {
+            systemRingtonePlayer?.stop()
+        } catch (e: Exception) {
+        }
+        systemRingtonePlayer?.release()
+        systemRingtonePlayer = null
+    }
+
+    override fun onDestroy() {
+        stopSystemRingtoneLoop()
+        super.onDestroy()
+    }
+
+    // ───────────── 알람 예약(AlarmManager) ─────────────
 
     private fun scheduleAlarmClock(
         requestCode: Int,
@@ -139,5 +269,6 @@ class MainActivity : FlutterActivity() {
         const val EXTRA_ALARM_ID = "alarmId"
         const val EXTRA_SNOOZE_COUNT = "snoozeCount"
         const val EXTRA_WEEKDAY = "weekday"
+        const val REQUEST_CODE_RINGTONE_PICKER = 9001
     }
 }

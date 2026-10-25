@@ -1,14 +1,30 @@
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../../providers/locale_provider.dart';
 import '../../models/alarm_model.dart';
 import '../../services/alarm_service.dart';
+import '../../services/native_alarm_channel.dart';
 import '../../utils/alarm_format.dart';
+import '../../utils/alarm_sounds.dart';
 import 'alarm_snooze_settings_screen.dart';
 
 const List<String> _kWeekdayLabelsKo = ['월', '화', '수', '목', '금', '토', '일'];
-const List<String> _kWeekdayLabelsEn = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const List<String> _kWeekdayLabelsEn = [
+  'Mon',
+  'Tue',
+  'Wed',
+  'Thu',
+  'Fri',
+  'Sat',
+  'Sun',
+];
+
+/// 기숙사 공용 "미션알람" QR 코드(기숙사 내 지정 장소에 부착된 코드).
+/// 새 알람에서 QR로 끄기를 켜면 별도 스캔 없이 바로 이 코드로 동작한다.
+const String _kDefaultMissionQrCode = 'https://m.site.naver.com/2jsh5';
 
 class AlarmScreen extends StatefulWidget {
   const AlarmScreen({super.key});
@@ -39,7 +55,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
 
   String _repeatSummary(AlarmModel alarm, bool isEnglish) {
     if (alarm.repeatDays.isEmpty) {
-      return formatAlarmDate(nextOccurrence(alarm.hour, alarm.minute), isEnglish);
+      return formatAlarmDate(
+        nextOccurrence(alarm.hour, alarm.minute),
+        isEnglish,
+      );
     }
     if (alarm.repeatDays.length == 7) {
       return isEnglish ? 'Every day' : '매일';
@@ -60,9 +79,10 @@ class _AlarmScreenState extends State<AlarmScreen> {
       builder: (context) => _AlarmEditSheet(existing: existing),
     );
     if (result == null) return;
-    final updated = await _service.addOrUpdateAlarm(result);
+    final (updated, error) = await _service.addOrUpdateAlarm(result);
     if (!mounted) return;
     setState(() => _alarms = updated);
+    if (error != null) _showScheduleFailedWarning(error);
   }
 
   Future<void> _delete(AlarmModel alarm) async {
@@ -72,9 +92,19 @@ class _AlarmScreenState extends State<AlarmScreen> {
   }
 
   Future<void> _toggle(AlarmModel alarm, bool value) async {
-    final updated = await _service.setEnabled(alarm.id, value);
+    final (updated, error) = await _service.setEnabled(alarm.id, value);
     if (!mounted) return;
     setState(() => _alarms = updated);
+    if (error != null) _showScheduleFailedWarning(error);
+  }
+
+  void _showScheduleFailedWarning(String error) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('알람 예약에 실패했습니다: $error'),
+        backgroundColor: Colors.red,
+      ),
+    );
   }
 
   @override
@@ -88,7 +118,7 @@ class _AlarmScreenState extends State<AlarmScreen> {
         backgroundColor: const Color(0xFFF5F6F8),
         elevation: 0,
         foregroundColor: Colors.black87,
-        title: Text(isEnglish ? 'Alarm' : '알람'),
+        title: Text(isEnglish ? 'Mission Alarm' : '미션알람'),
         actions: [
           IconButton(
             icon: const Icon(Icons.add),
@@ -104,7 +134,9 @@ class _AlarmScreenState extends State<AlarmScreen> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
                     child: Text(
-                      isEnglish ? 'All alarms are off' : '모든 알람이\n꺼진 상태입니다',
+                      isEnglish
+                          ? 'All mission alarms are off'
+                          : '모든 미션알람이\n꺼진 상태입니다',
                       textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 20,
@@ -120,11 +152,17 @@ class _AlarmScreenState extends State<AlarmScreen> {
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.alarm, size: 48, color: Colors.grey),
+                              const Icon(
+                                Icons.alarm,
+                                size: 48,
+                                color: Colors.grey,
+                              ),
                               const SizedBox(height: 12),
-                              Text(isEnglish
-                                  ? 'No alarms yet. Tap + to add one.'
-                                  : '등록된 알람이 없습니다. +를 눌러 추가하세요.'),
+                              Text(
+                                isEnglish
+                                    ? 'No mission alarms yet. Tap + to add one.'
+                                    : '등록된 미션알람이 없습니다. +를 눌러 추가하세요.',
+                              ),
                             ],
                           ),
                         )
@@ -137,83 +175,161 @@ class _AlarmScreenState extends State<AlarmScreen> {
                               key: ValueKey(alarm.id),
                               direction: DismissDirection.endToStart,
                               background: Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                                margin: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 6,
+                                ),
                                 decoration: BoxDecoration(
                                   color: Colors.red,
                                   borderRadius: BorderRadius.circular(16),
                                 ),
                                 alignment: Alignment.centerRight,
                                 padding: const EdgeInsets.only(right: 24),
-                                child: const Icon(Icons.delete, color: Colors.white),
+                                child: const Icon(
+                                  Icons.delete,
+                                  color: Colors.white,
+                                ),
                               ),
                               onDismissed: (_) => _delete(alarm),
                               child: GestureDetector(
                                 onTap: () => _openEditor(existing: alarm),
                                 child: Container(
-                                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                  padding: const EdgeInsets.fromLTRB(20, 16, 16, 16),
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 6,
+                                  ),
+                                  padding: const EdgeInsets.fromLTRB(
+                                    20,
+                                    16,
+                                    16,
+                                    16,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: Colors.white,
                                     borderRadius: BorderRadius.circular(16),
                                   ),
                                   child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.center,
                                     children: [
                                       Expanded(
                                         child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
                                           children: [
-                                            if (alarm.label.isNotEmpty)
+                                            if (alarm.qrDismissEnabled &&
+                                                (alarm.qrCode?.isNotEmpty ??
+                                                    false))
                                               Padding(
-                                                padding: const EdgeInsets.only(bottom: 4),
-                                                child: Row(
-                                                  children: [
-                                                    if (alarm.qrDismissEnabled &&
-                                                        (alarm.qrCode?.isNotEmpty ?? false)) ...[
-                                                      Icon(Icons.qr_code,
-                                                          size: 14,
-                                                          color: alarm.enabled
-                                                              ? const Color(0xFF5B5FEF)
-                                                              : Colors.grey),
-                                                      const SizedBox(width: 4),
-                                                    ],
-                                                    Text(
-                                                      alarm.label,
-                                                      style: TextStyle(
-                                                        fontSize: 13,
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 4,
+                                                ),
+                                                child: Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 7,
+                                                        vertical: 2,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color:
+                                                        (alarm.enabled
+                                                                ? const Color(
+                                                                    0xFF5B5FEF,
+                                                                  )
+                                                                : Colors.grey)
+                                                            .withValues(
+                                                              alpha: 0.12,
+                                                            ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          6,
+                                                        ),
+                                                  ),
+                                                  child: Row(
+                                                    mainAxisSize:
+                                                        MainAxisSize.min,
+                                                    children: [
+                                                      Icon(
+                                                        Icons.qr_code,
+                                                        size: 12,
                                                         color: alarm.enabled
-                                                            ? Colors.black54
+                                                            ? const Color(
+                                                                0xFF5B5FEF,
+                                                              )
                                                             : Colors.grey,
                                                       ),
-                                                    ),
-                                                  ],
+                                                      const SizedBox(width: 3),
+                                                      Text(
+                                                        isEnglish
+                                                            ? 'Mission Alarm'
+                                                            : '미션알람',
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color: alarm.enabled
+                                                              ? const Color(
+                                                                  0xFF5B5FEF,
+                                                                )
+                                                              : Colors.grey,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            if (alarm.label.isNotEmpty)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 4,
+                                                ),
+                                                child: Text(
+                                                  alarm.label,
+                                                  style: TextStyle(
+                                                    fontSize: 13,
+                                                    color: alarm.enabled
+                                                        ? Colors.black54
+                                                        : Colors.grey,
+                                                  ),
                                                 ),
                                               ),
                                             Text(
-                                              formatAlarmClock(alarm.hour, alarm.minute, isEnglish),
+                                              formatAlarmClock(
+                                                alarm.hour,
+                                                alarm.minute,
+                                                isEnglish,
+                                              ),
                                               style: TextStyle(
                                                 fontSize: 30,
                                                 fontWeight: FontWeight.bold,
-                                                color: alarm.enabled ? Colors.black : Colors.grey,
+                                                color: alarm.enabled
+                                                    ? Colors.black
+                                                    : Colors.grey,
                                               ),
                                             ),
                                           ],
                                         ),
                                       ),
                                       Column(
-                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
                                         children: [
                                           Text(
                                             _repeatSummary(alarm, isEnglish),
                                             style: TextStyle(
                                               fontSize: 13,
-                                              color: alarm.enabled ? Colors.black54 : Colors.grey,
+                                              color: alarm.enabled
+                                                  ? Colors.black54
+                                                  : Colors.grey,
                                             ),
                                           ),
                                           Switch(
                                             value: alarm.enabled,
-                                            activeThumbColor: const Color(0xFF5B5FEF),
-                                            onChanged: (value) => _toggle(alarm, value),
+                                            activeThumbColor: const Color(
+                                              0xFF5B5FEF,
+                                            ),
+                                            onChanged: (value) =>
+                                                _toggle(alarm, value),
                                           ),
                                         ],
                                       ),
@@ -252,6 +368,9 @@ class _AlarmEditSheetState extends State<_AlarmEditSheet> {
   late bool _qrDismissEnabled;
   String? _qrCode;
   late bool _soundEnabled;
+  late String _soundId;
+  String? _soundUri;
+  String? _soundTitle;
   late bool _vibrationEnabled;
   late bool _snoozeEnabled;
   late int _snoozeMinutes;
@@ -267,28 +386,110 @@ class _AlarmEditSheetState extends State<_AlarmEditSheet> {
     _isPm = initialTime.period == DayPeriod.pm;
     _hour12 = initialTime.hourOfPeriod == 0 ? 12 : initialTime.hourOfPeriod;
     _minute = initialTime.minute;
-    _hourController = FixedExtentScrollController(initialItem: _kWheelBase + (_hour12 - 1));
-    _minuteController = FixedExtentScrollController(initialItem: _kWheelBase + _minute);
+    _hourController = FixedExtentScrollController(
+      initialItem: _kWheelBase + (_hour12 - 1),
+    );
+    _minuteController = FixedExtentScrollController(
+      initialItem: _kWheelBase + _minute,
+    );
     _repeatDays = {...(existing?.repeatDays ?? {})};
     _labelController = TextEditingController(text: existing?.label ?? '');
     _qrDismissEnabled = existing?.qrDismissEnabled ?? false;
-    _qrCode = existing?.qrCode;
+    _qrCode = existing?.qrCode ?? _kDefaultMissionQrCode;
     _soundEnabled = existing?.soundEnabled ?? true;
+    _soundId = existing?.soundId ?? kDefaultAlarmSoundId;
+    _soundUri = existing?.soundUri;
+    _soundTitle = existing?.soundTitle;
     _vibrationEnabled = existing?.vibrationEnabled ?? true;
     _snoozeEnabled = existing?.snoozeEnabled ?? false;
     _snoozeMinutes = existing?.snoozeMinutes ?? 5;
     _snoozeRepeatCount = existing?.snoozeRepeatCount ?? 3;
+
+    // 새 알람이면 사용자가 지금 쓰고 있는 전화 벨소리를 기본값으로 쓴다.
+    if (existing == null && Platform.isAndroid) {
+      _loadDefaultSystemSound();
+    }
   }
+
+  Future<void> _loadDefaultSystemSound() async {
+    final result = await NativeAlarmChannel.getDefaultSystemRingtone();
+    if (result == null || !mounted) return;
+    // 그 사이 사용자가 이미 다른 소리를 골랐으면 덮어쓰지 않는다.
+    if (_soundUri != null) return;
+    setState(() {
+      _soundUri = result['uri'];
+      _soundTitle = result['title'];
+    });
+  }
+
+  final AudioPlayer _previewPlayer = AudioPlayer();
 
   @override
   void dispose() {
     _labelController.dispose();
     _hourController.dispose();
     _minuteController.dispose();
+    _previewPlayer.dispose();
     super.dispose();
   }
 
   int get _hour24 => _isPm ? (_hour12 % 12) + 12 : (_hour12 % 12);
+
+  String _currentSoundName(bool isEnglish) {
+    if (_soundUri != null && (_soundTitle?.isNotEmpty ?? false)) {
+      return _soundTitle!;
+    }
+    return alarmSoundById(_soundId).name(isEnglish);
+  }
+
+  Future<void> _previewSound(String soundId) async {
+    try {
+      await _previewPlayer.stop();
+      await _previewPlayer.play(AssetSource(alarmSoundById(soundId).assetPath));
+    } catch (_) {}
+  }
+
+  Future<void> _openSoundPicker() async {
+    // 안드로이드는 앱 내장 목록 없이 바로 기기 알람음 선택창으로 보낸다.
+    // (iOS는 시스템 알람음에 접근할 방법이 없어 앱 내장 사운드만 고를 수 있다.)
+    if (Platform.isAndroid) {
+      final (result, error) = await NativeAlarmChannel.pickSystemRingtone(
+        currentUri: _soundUri,
+      );
+      if (!mounted) return;
+      if (result != null) {
+        setState(() {
+          _soundUri = result['uri'];
+          _soundTitle = result['title'];
+        });
+      } else if (error != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('기기 알람음을 열 수 없습니다: $error')));
+      }
+      return;
+    }
+
+    await _previewPlayer.stop();
+    if (!mounted) return;
+    final result = await showModalBottomSheet<AlarmSoundPick>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) =>
+          _SoundPickerSheet(selectedId: _soundId, onPreview: _previewSound),
+    );
+    await _previewPlayer.stop();
+    if (result != null && mounted) {
+      setState(() {
+        _soundId = result.bundledId!;
+        _soundUri = null;
+        _soundTitle = null;
+      });
+    }
+  }
 
   Future<void> _openSnoozeSettings() async {
     final result = await Navigator.of(context).push<SnoozeResult>(
@@ -335,6 +536,9 @@ class _AlarmEditSheetState extends State<_AlarmEditSheet> {
       qrDismissEnabled: _qrDismissEnabled,
       qrCode: _qrDismissEnabled ? _qrCode : null,
       soundEnabled: _soundEnabled,
+      soundId: _soundId,
+      soundUri: _soundUri,
+      soundTitle: _soundTitle,
       vibrationEnabled: _vibrationEnabled,
       snoozeEnabled: _snoozeEnabled,
       snoozeMinutes: _snoozeMinutes,
@@ -413,10 +617,16 @@ class _AlarmEditSheetState extends State<_AlarmEditSheet> {
     final isEnglish = Provider.of<LocaleProvider>(context).isEnglish;
     final labels = isEnglish ? _kWeekdayLabelsEn : _kWeekdayLabelsKo;
     final dateSummary = _repeatDays.isEmpty
-        ? formatAlarmDate(nextOccurrence(_hour24, _minute), isEnglish, withRelativePrefix: true)
+        ? formatAlarmDate(
+            nextOccurrence(_hour24, _minute),
+            isEnglish,
+            withRelativePrefix: true,
+          )
         : (_repeatDays.length == 7
-            ? (isEnglish ? 'Every day' : '매일')
-            : (_repeatDays.toList()..sort()).map((d) => labels[d - 1]).join(', '));
+              ? (isEnglish ? 'Every day' : '매일')
+              : (_repeatDays.toList()..sort())
+                    .map((d) => labels[d - 1])
+                    .join(', '));
 
     return Padding(
       padding: EdgeInsets.only(
@@ -425,191 +635,316 @@ class _AlarmEditSheetState extends State<_AlarmEditSheet> {
         top: 12,
         bottom: MediaQuery.of(context).viewInsets.bottom + 20,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
             ),
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _buildAmPmToggle(isEnglish),
-              const SizedBox(width: 8),
-              _buildWheel(
-                controller: _hourController,
-                modulo: 12,
-                selectedValue: _hour12 - 1,
-                onChanged: (v) => setState(() => _hour12 = v + 1),
-                labelBuilder: (v) => '${v + 1}',
-              ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Text(':', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-              ),
-              _buildWheel(
-                controller: _minuteController,
-                modulo: 60,
-                selectedValue: _minute,
-                onChanged: (v) => setState(() => _minute = v),
-                labelBuilder: (v) => v.toString().padLeft(2, '0'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Center(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                const Icon(Icons.calendar_today, size: 14, color: Colors.black54),
-                const SizedBox(width: 6),
-                Text(dateSummary, style: const TextStyle(color: Colors.black54)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(7, (i) {
-              final weekday = i + 1;
-              final selected = _repeatDays.contains(weekday);
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (selected) {
-                      _repeatDays.remove(weekday);
-                    } else {
-                      _repeatDays.add(weekday);
-                    }
-                  });
-                },
-                child: CircleAvatar(
-                  radius: 18,
-                  backgroundColor: selected ? const Color(0xFF5B5FEF) : const Color(0xFFF0F0F3),
+                _buildAmPmToggle(isEnglish),
+                const SizedBox(width: 8),
+                _buildWheel(
+                  controller: _hourController,
+                  modulo: 12,
+                  selectedValue: _hour12 - 1,
+                  onChanged: (v) => setState(() => _hour12 = v + 1),
+                  labelBuilder: (v) => '${v + 1}',
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 4),
                   child: Text(
-                    labels[i],
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: selected ? Colors.white : Colors.black54,
-                    ),
+                    ':',
+                    style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
                   ),
                 ),
-              );
-            }),
-          ),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _labelController,
-            decoration: InputDecoration(
-              hintText: isEnglish ? 'Alarm name' : '알람 이름',
-              border: const UnderlineInputBorder(),
+                _buildWheel(
+                  controller: _minuteController,
+                  modulo: 60,
+                  selectedValue: _minute,
+                  onChanged: (v) => setState(() => _minute = v),
+                  labelBuilder: (v) => v.toString().padLeft(2, '0'),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(isEnglish ? 'Alarm sound' : '알람음'),
-            subtitle: Text(
-              _soundEnabled
-                  ? (isEnglish ? 'Default alarm sound' : '기본 알람음')
-                  : (isEnglish ? 'Off' : '사용 안 함'),
-            ),
-            activeThumbColor: const Color(0xFF5B5FEF),
-            value: _soundEnabled,
-            onChanged: (value) => setState(() => _soundEnabled = value),
-          ),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(isEnglish ? 'Vibration' : '진동'),
-            subtitle: Text(
-              _vibrationEnabled
-                  ? (isEnglish ? 'Default vibration' : '기본 진동')
-                  : (isEnglish ? 'Off' : '사용 안 함'),
-            ),
-            activeThumbColor: const Color(0xFF5B5FEF),
-            value: _vibrationEnabled,
-            onChanged: (value) => setState(() => _vibrationEnabled = value),
-          ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(isEnglish ? 'Snooze' : '다시 울림'),
-            subtitle: Text(
-              _snoozeEnabled
-                  ? (isEnglish
-                      ? 'Every $_snoozeMinutes min, ${_snoozeRepeatCount == -1 ? 'repeat continuously' : '$_snoozeRepeatCount times'}'
-                      : '$_snoozeMinutes분마다, ${_snoozeRepeatCount == -1 ? '계속 반복' : '$_snoozeRepeatCount회'}')
-                  : (isEnglish ? 'Off' : '사용 안 함'),
-            ),
-            trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-            onTap: _openSnoozeSettings,
-          ),
-          const Divider(height: 24),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text(isEnglish ? 'Turn off with QR code' : 'QR 코드로 끄기'),
-            subtitle: Text(
-              isEnglish
-                  ? 'The alarm can only be stopped by scanning the registered QR code.'
-                  : '등록된 QR 코드를 스캔해야만 알람을 끌 수 있습니다.',
-            ),
-            activeThumbColor: const Color(0xFF5B5FEF),
-            value: _qrDismissEnabled,
-            onChanged: (value) => setState(() => _qrDismissEnabled = value),
-          ),
-          if (_qrDismissEnabled)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+            const SizedBox(height: 8),
+            Center(
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: Text(
-                      _qrCode == null || _qrCode!.isEmpty
-                          ? (isEnglish ? 'No QR code registered' : '등록된 QR 코드 없음')
-                          : (isEnglish ? 'QR code registered' : 'QR 코드 등록됨'),
-                      style: TextStyle(
-                        color: (_qrCode == null || _qrCode!.isEmpty) ? Colors.red : Colors.green,
-                      ),
-                    ),
+                  const Icon(
+                    Icons.calendar_today,
+                    size: 14,
+                    color: Colors.black54,
                   ),
-                  TextButton.icon(
-                    onPressed: _scanQrCode,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: Text(isEnglish ? 'Scan' : 'QR 스캔'),
+                  const SizedBox(width: 6),
+                  Text(
+                    dateSummary,
+                    style: const TextStyle(color: Colors.black54),
                   ),
                 ],
               ),
             ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(isEnglish ? 'Cancel' : '취소'),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: List.generate(7, (i) {
+                final weekday = i + 1;
+                final selected = _repeatDays.contains(weekday);
+                return GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      if (selected) {
+                        _repeatDays.remove(weekday);
+                      } else {
+                        _repeatDays.add(weekday);
+                      }
+                    });
+                  },
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: selected
+                        ? const Color(0xFF5B5FEF)
+                        : const Color(0xFFF0F0F3),
+                    child: Text(
+                      labels[i],
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: selected ? Colors.white : Colors.black54,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _labelController,
+              decoration: InputDecoration(
+                hintText: isEnglish ? 'Alarm name' : '알람 이름',
+                border: const UnderlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(isEnglish ? 'Alarm sound' : '알람음'),
+              subtitle: Text(
+                _soundEnabled
+                    ? _currentSoundName(isEnglish)
+                    : (isEnglish ? 'Off' : '사용 안 함'),
+              ),
+              activeThumbColor: const Color(0xFF5B5FEF),
+              value: _soundEnabled,
+              onChanged: (value) => setState(() => _soundEnabled = value),
+            ),
+            if (_soundEnabled)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(isEnglish ? 'Choose sound' : '알람음 선택'),
+                  subtitle: Text(_currentSoundName(isEnglish)),
+                  trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+                  onTap: _openSoundPicker,
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF5B5FEF)),
-                  onPressed: _save,
-                  child: Text(isEnglish ? 'Save' : '저장'),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(isEnglish ? 'Vibration' : '진동'),
+              subtitle: Text(
+                _vibrationEnabled
+                    ? (isEnglish ? 'Default vibration' : '기본 진동')
+                    : (isEnglish ? 'Off' : '사용 안 함'),
+              ),
+              activeThumbColor: const Color(0xFF5B5FEF),
+              value: _vibrationEnabled,
+              onChanged: (value) => setState(() => _vibrationEnabled = value),
+            ),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(isEnglish ? 'Snooze' : '다시 울림'),
+              subtitle: Text(
+                _snoozeEnabled
+                    ? (isEnglish
+                          ? 'Every $_snoozeMinutes min, ${_snoozeRepeatCount == -1 ? 'repeat continuously' : '$_snoozeRepeatCount times'}'
+                          : '$_snoozeMinutes분마다, ${_snoozeRepeatCount == -1 ? '계속 반복' : '$_snoozeRepeatCount회'}')
+                    : (isEnglish ? 'Off' : '사용 안 함'),
+              ),
+              trailing: const Icon(Icons.chevron_right, color: Colors.grey),
+              onTap: _openSnoozeSettings,
+            ),
+            const Divider(height: 24),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(isEnglish ? 'Turn off with QR code' : 'QR 코드로 끄기'),
+              subtitle: Text(
+                isEnglish
+                    ? 'The alarm can only be stopped by scanning the registered QR code.'
+                    : '등록된 QR 코드를 스캔해야만 알람을 끌 수 있습니다.',
+              ),
+              activeThumbColor: const Color(0xFF5B5FEF),
+              value: _qrDismissEnabled,
+              onChanged: (value) => setState(() => _qrDismissEnabled = value),
+            ),
+            if (_qrDismissEnabled)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        _qrCode == null || _qrCode!.isEmpty
+                            ? (isEnglish
+                                  ? 'No QR code registered'
+                                  : '등록된 QR 코드 없음')
+                            : (isEnglish ? 'QR code registered' : 'QR 코드 등록됨'),
+                        style: TextStyle(
+                          color: (_qrCode == null || _qrCode!.isEmpty)
+                              ? Colors.red
+                              : Colors.green,
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: _scanQrCode,
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: Text(isEnglish ? 'Scan' : 'QR 스캔'),
+                    ),
+                  ],
                 ),
+              ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(isEnglish ? 'Cancel' : '취소'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF5B5FEF),
+                    ),
+                    onPressed: _save,
+                    child: Text(isEnglish ? 'Save' : '저장'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 알람음 선택 결과(앱 내장 사운드 id).
+class AlarmSoundPick {
+  final String? bundledId;
+  const AlarmSoundPick.bundled(String id) : bundledId = id;
+}
+
+/// 앱 내장 알람음을 고르는 바텀시트. iOS 전용(안드로이드는 기기 알람음 선택창으로
+/// 바로 보내므로 이 화면을 거치지 않는다). 각 항목을 누르면 바로 미리듣기가 재생된다.
+class _SoundPickerSheet extends StatefulWidget {
+  final String selectedId;
+  final Future<void> Function(String soundId) onPreview;
+  const _SoundPickerSheet({required this.selectedId, required this.onPreview});
+
+  @override
+  State<_SoundPickerSheet> createState() => _SoundPickerSheetState();
+}
+
+class _SoundPickerSheetState extends State<_SoundPickerSheet> {
+  late String _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    _selected = widget.selectedId;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnglish = Provider.of<LocaleProvider>(context).isEnglish;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text(
+                isEnglish ? 'Choose alarm sound' : '알람음 선택',
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final option in kAlarmSoundOptions)
+                RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  value: option.id,
+                  // ignore: deprecated_member_use
+                  groupValue: _selected,
+                  activeColor: const Color(0xFF5B5FEF),
+                  title: Text(option.name(isEnglish)),
+                  secondary: IconButton(
+                    icon: const Icon(Icons.play_circle_outline),
+                    color: const Color(0xFF5B5FEF),
+                    onPressed: () => widget.onPreview(option.id),
+                  ),
+                  // ignore: deprecated_member_use
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _selected = value);
+                    widget.onPreview(value);
+                  },
+                ),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 50),
+                  backgroundColor: const Color(0xFF5B5FEF),
+                ),
+                onPressed: () =>
+                    Navigator.pop(context, AlarmSoundPick.bundled(_selected)),
+                child: Text(isEnglish ? 'Done' : '선택 완료'),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -628,7 +963,9 @@ class _QrRegisterScanPageState extends State<_QrRegisterScanPage> {
 
   void _onDetect(BarcodeCapture capture) {
     if (_handled) return;
-    final value = capture.barcodes.isNotEmpty ? capture.barcodes.first.rawValue : null;
+    final value = capture.barcodes.isNotEmpty
+        ? capture.barcodes.first.rawValue
+        : null;
     if (value == null || value.isEmpty) return;
     _handled = true;
     Navigator.pop(context, value);

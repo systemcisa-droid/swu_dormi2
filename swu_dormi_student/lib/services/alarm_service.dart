@@ -94,7 +94,8 @@ class AlarmService {
 
   int generateId() => DateTime.now().millisecondsSinceEpoch % 100000;
 
-  Future<List<AlarmModel>> addOrUpdateAlarm(AlarmModel alarm) async {
+  /// 반환값: (갱신된 알람 목록, 네이티브 예약 실패 시 에러 메시지(성공하면 null)).
+  Future<(List<AlarmModel>, String?)> addOrUpdateAlarm(AlarmModel alarm) async {
     final alarms = await loadAlarms();
     final idx = alarms.indexWhere((a) => a.id == alarm.id);
     if (idx >= 0) {
@@ -103,8 +104,8 @@ class AlarmService {
       alarms.add(alarm);
     }
     await _saveAlarms(alarms);
-    await _reschedule(alarm);
-    return loadAlarms();
+    final error = await _reschedule(alarm);
+    return (await loadAlarms(), error);
   }
 
   Future<List<AlarmModel>> deleteAlarm(int id) async {
@@ -115,18 +116,19 @@ class AlarmService {
     return alarms;
   }
 
-  Future<List<AlarmModel>> setEnabled(int id, bool enabled) async {
+  Future<(List<AlarmModel>, String?)> setEnabled(int id, bool enabled) async {
     final alarms = await loadAlarms();
     final idx = alarms.indexWhere((a) => a.id == id);
-    if (idx < 0) return alarms;
+    if (idx < 0) return (alarms, null);
     alarms[idx] = alarms[idx].copyWith(enabled: enabled);
     await _saveAlarms(alarms);
+    String? error;
     if (enabled) {
-      await _reschedule(alarms[idx]);
+      error = await _reschedule(alarms[idx]);
     } else {
       await _cancelAll(id);
     }
-    return alarms;
+    return (alarms, error);
   }
 
   Future<void> _cancelAll(int id) async {
@@ -137,12 +139,14 @@ class AlarmService {
     await NativeAlarmChannel.cancelAlarm(id * 10 + _snoozeSlot);
   }
 
-  Future<void> _reschedule(AlarmModel alarm) async {
+  /// 성공하면 null, 실패하면 에러 메시지를 반환한다(요일별로 여러 건 예약하는
+  /// 경우 처음 실패한 건의 메시지).
+  Future<String?> _reschedule(AlarmModel alarm) async {
     await _cancelAll(alarm.id);
-    if (!alarm.enabled) return;
+    if (!alarm.enabled) return null;
 
     if (alarm.repeatDays.isEmpty) {
-      await NativeAlarmChannel.scheduleAlarmClock(
+      return NativeAlarmChannel.scheduleAlarmClock(
         requestCode: alarm.id * 10,
         triggerAt: _nextInstanceOfTime(alarm.hour, alarm.minute),
         alarmId: alarm.id,
@@ -150,16 +154,19 @@ class AlarmService {
         weekday: 0,
       );
     } else {
+      String? firstError;
       for (final weekday in alarm.repeatDays) {
-        await _scheduleWeekday(alarm, weekday, addWeek: false);
+        final error = await _scheduleWeekday(alarm, weekday, addWeek: false);
+        firstError ??= error;
       }
+      return firstError;
     }
   }
 
-  Future<void> _scheduleWeekday(AlarmModel alarm, int weekday, {required bool addWeek}) async {
+  Future<String?> _scheduleWeekday(AlarmModel alarm, int weekday, {required bool addWeek}) async {
     var when = _nextInstanceOfTimeAndWeekday(alarm.hour, alarm.minute, weekday);
     if (addWeek) when = when.add(const Duration(days: 7));
-    await NativeAlarmChannel.scheduleAlarmClock(
+    return NativeAlarmChannel.scheduleAlarmClock(
       requestCode: alarm.id * 10 + weekday,
       triggerAt: when,
       alarmId: alarm.id,

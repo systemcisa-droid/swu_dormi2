@@ -3,9 +3,14 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.VIBRATE"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
-    <!-- 알람 기능: 재부팅 후에도 복원되도록 함. AlarmManager.setAlarmClock()은
-         정확한 시각 예약에 별도 권한이 필요 없다. -->
+    <!-- 미션알람: AlarmManager.setAlarmClock()도 정확한 알람 권한이 필요하다.
+         Android 13 이상은 USE_EXACT_ALARM(설치 시 자동 허용),
+         Android 12(API 31~32)는 SCHEDULE_EXACT_ALARM(기본 허용)을 쓴다. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <uses-permission
+        android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:maxSdkVersion="32"/>
 
     <application
         android:label="샬롬하우스"
@@ -61,6 +66,11 @@
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- 미션알람: 기기 알람음 선택창(RingtoneManager.ACTION_RINGTONE_PICKER)을
+             안드로이드 11 이상에서 찾을 수 있으려면 명시적으로 선언해야 한다. -->
+        <intent>
+            <action android:name="android.intent.action.RINGTONE_PICKER"/>
         </intent>
     </queries>
 </manifest>

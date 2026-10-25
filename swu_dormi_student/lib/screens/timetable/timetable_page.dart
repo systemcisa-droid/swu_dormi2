@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/post_model.dart';
 import '../../utils/constants.dart';
+import '../../services/class_reminder_sync.dart';
 
 // --- Models ---
 
@@ -18,6 +20,8 @@ class ClassItem {
   int startMinute; // e.g., 30
   double durationMinutes; // e.g., 90
   Color color;
+  // 수업 시작 몇 분 전에 알람을 울릴지(5/10/20분 중 선택, 여러 개 가능, 비어있으면 알람 없음).
+  Set<int> reminderOffsets;
 
   ClassItem({
     required this.id,
@@ -28,7 +32,8 @@ class ClassItem {
     required this.startMinute,
     required this.durationMinutes,
     required this.color,
-  });
+    Set<int>? reminderOffsets,
+  }) : reminderOffsets = reminderOffsets ?? {10};
 
   Map<String, dynamic> toMap() {
     return {
@@ -40,6 +45,7 @@ class ClassItem {
       'startMinute': startMinute,
       'durationMinutes': durationMinutes,
       'color': color.value,
+      'reminderOffsets': reminderOffsets.toList(),
     };
   }
 
@@ -53,6 +59,10 @@ class ClassItem {
       startMinute: map['startMinute'],
       durationMinutes: map['durationMinutes'].toDouble(),
       color: Color(map['color']),
+      // 예전에 저장된 데이터(필드 없음)는 기존 동작대로 10분 전 알람을 유지한다.
+      reminderOffsets: map['reminderOffsets'] != null
+          ? Set<int>.from(map['reminderOffsets'] as List)
+          : {10},
     );
   }
 }
@@ -152,6 +162,21 @@ class _TimetablePageState extends State<TimetablePage> {
     final String jsonStr = jsonEncode(_timetables.map((t) => t.toMap()).toList());
     await prefs.setString('timetables_data', jsonStr);
     await prefs.setString('current_timetable_id', _currentTimetableId);
+
+    // 지금 보고 있는(현재) 시간표 기준으로 수업별 사전 알람을 자동으로 맞춘다.
+    unawaited(
+      ClassReminderSync.sync([
+        for (final c in _currentTimetable.classes)
+          (
+            id: c.id,
+            title: c.title,
+            dayIndex: c.dayIndex,
+            startHour: c.startHour,
+            startMinute: c.startMinute,
+            reminderOffsets: c.reminderOffsets,
+          ),
+      ]),
+    );
   }
 
   // --- 게시판 공유 ---
@@ -553,30 +578,44 @@ class _TimetablePageState extends State<TimetablePage> {
           color: item.color,
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
+        child: Stack(
           children: [
-            Text(
-              item.title,
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.black87,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.title,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  item.room,
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: Colors.black.withValues(alpha: 0.6),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
-            const SizedBox(height: 2),
-            Text(
-              item.room,
-              style: TextStyle(
-                fontSize: 9,
-                color: Colors.black.withValues(alpha: 0.6),
+            if (item.reminderOffsets.isNotEmpty)
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Icon(
+                  Icons.alarm,
+                  size: 11,
+                  color: Colors.red,
+                ),
               ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
           ],
         ),
       ),
@@ -977,6 +1016,7 @@ class _TimetablePageState extends State<TimetablePage> {
     int startMinute = item?.startMinute ?? 0;
     int duration = item?.durationMinutes.toInt() ?? 90; // Default 1.5h
     Color selectedColor = item?.color ?? const Color(0xFFFDE4E4);
+    Set<int> reminderOffsets = {...(item?.reminderOffsets ?? {10})};
 
     showModalBottomSheet(
       context: context,
@@ -1146,6 +1186,31 @@ class _TimetablePageState extends State<TimetablePage> {
                     onChanged: (val) => setModalState(() => duration = val.toInt()),
                   ),
                   const SizedBox(height: 12),
+                  // 수업 시작 전 알람
+                  const Text('수업 시작 전 알람'),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4,
+                    children: [5, 10, 20].map((offset) {
+                      final checked = reminderOffsets.contains(offset);
+                      return FilterChip(
+                        label: Text('$offset분 전'),
+                        selected: checked,
+                        selectedColor: AppConstants.primaryColor.withValues(alpha: 0.2),
+                        checkmarkColor: AppConstants.primaryColor,
+                        onSelected: (value) {
+                          setModalState(() {
+                            if (value) {
+                              reminderOffsets.add(offset);
+                            } else {
+                              reminderOffsets.remove(offset);
+                            }
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
                   // Color Picker
                   const Text('색상'),
                   const SizedBox(height: 8),
@@ -1231,6 +1296,7 @@ class _TimetablePageState extends State<TimetablePage> {
                                 item.startMinute = startMinute; 
                                 item.durationMinutes = duration.toDouble();
                                 item.color = selectedColor;
+                                item.reminderOffsets = reminderOffsets;
                               } else {
                                 // Add new
                                 _classes.add(ClassItem(
@@ -1241,6 +1307,7 @@ class _TimetablePageState extends State<TimetablePage> {
                                   startHour: startHour,
                                   startMinute: startMinute,
                                   durationMinutes: duration.toDouble(),
+                                  reminderOffsets: reminderOffsets,
                                   color: selectedColor,
                                 ));
                               }
