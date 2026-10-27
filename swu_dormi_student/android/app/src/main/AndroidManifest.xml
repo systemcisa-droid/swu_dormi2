@@ -11,6 +11,8 @@
     <uses-permission
         android:name="android.permission.SCHEDULE_EXACT_ALARM"
         android:maxSdkVersion="32"/>
+    <!-- 화면이 꺼져 있어도 알람 울림 화면을 깨우기 위함. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <application
         android:label="샬롬하우스"
@@ -49,6 +51,16 @@
         <!-- flutter_local_notifications: 예약 알림을 실제로 울리게 하는 리시버들 -->
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
         <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- 미션알람: 재부팅/앱 업데이트로 날아간 AlarmManager 알람을 앱을 열지 않고도 다시 예약한다. -->
+        <receiver android:exported="false" android:name=".BootAlarmReceiver">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>

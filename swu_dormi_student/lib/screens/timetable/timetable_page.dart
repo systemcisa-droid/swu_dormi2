@@ -2,10 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:provider/provider.dart';
-import '../../providers/auth_provider.dart';
-import '../../models/post_model.dart';
 import '../../utils/constants.dart';
 import '../../services/class_reminder_sync.dart';
 
@@ -71,26 +67,14 @@ class TimetableData {
   String id;
   String name;
   List<ClassItem> classes;
-  // 게시판 공유 체크박스 상태. 켜져 있으면 sharedPostId가 그 시간표를 공유 중인
-  // board_posts 문서를 가리킨다(수업을 고치면 같은 문서를 갱신, 체크 해제 시 삭제).
-  bool isShared;
-  String? sharedPostId;
 
-  TimetableData({
-    required this.id,
-    required this.name,
-    required this.classes,
-    this.isShared = false,
-    this.sharedPostId,
-  });
+  TimetableData({required this.id, required this.name, required this.classes});
 
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'name': name,
       'classes': classes.map((x) => x.toMap()).toList(),
-      'isShared': isShared,
-      'sharedPostId': sharedPostId,
     };
   }
 
@@ -101,8 +85,6 @@ class TimetableData {
       classes: List<ClassItem>.from(
         map['classes']?.map((x) => ClassItem.fromMap(x)) ?? [],
       ),
-      isShared: map['isShared'] == true,
-      sharedPostId: map['sharedPostId'] as String?,
     );
   }
 }
@@ -152,9 +134,32 @@ class _TimetablePageState extends State<TimetablePage> {
           _initializeData();
         }
       });
+      _clearExampleTimetableReminders();
     } else {
       _initializeData();
     }
+  }
+
+  /// 예시 시간표(id '1')에 예전 기본값(10분 전 알림)이 아직 남아있으면 한 번만
+  /// 지워준다. 참고용 시간표라 알람이 자동으로 울릴 필요가 없다.
+  void _clearExampleTimetableReminders() {
+    TimetableData? example;
+    for (final t in _timetables) {
+      if (t.id == '1') {
+        example = t;
+        break;
+      }
+    }
+    final found = example;
+    if (found == null) return;
+    final hasReminders = found.classes.any((c) => c.reminderOffsets.isNotEmpty);
+    if (!hasReminders) return;
+    setState(() {
+      for (final c in found.classes) {
+        c.reminderOffsets = {};
+      }
+    });
+    _saveData();
   }
 
   Future<void> _saveData() async {
@@ -179,117 +184,7 @@ class _TimetablePageState extends State<TimetablePage> {
     );
   }
 
-  // --- 게시판 공유 ---
-
-  /// 수업 목록을 게시글 본문용 텍스트로 요약한다(요일·시간순 정렬).
-  String _buildShareContent(List<ClassItem> classes) {
-    if (classes.isEmpty) return '아직 등록된 수업이 없어요.';
-    final days = ['월', '화', '수', '목', '금'];
-    final sorted = List<ClassItem>.from(classes)
-      ..sort((a, b) {
-        if (a.dayIndex != b.dayIndex) return a.dayIndex.compareTo(b.dayIndex);
-        return (a.startHour * 60 + a.startMinute).compareTo(b.startHour * 60 + b.startMinute);
-      });
-    return sorted.map((c) {
-      final endTotal = c.startHour * 60 + c.startMinute + c.durationMinutes.toInt();
-      final end = '${endTotal ~/ 60}:${(endTotal % 60).toString().padLeft(2, '0')}';
-      final start = '${c.startHour}:${c.startMinute.toString().padLeft(2, '0')}';
-      return '${days[c.dayIndex]} $start~$end  ${c.title} (${c.room})';
-    }).join('\n');
-  }
-
-  /// 공유 체크박스를 켜고 끈다. 켜면 board_posts에 새 글을 만들고, 끄면 그 글을 지운다.
-  Future<void> _toggleShare(bool value) async {
-    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('로그인이 필요합니다')),
-      );
-      return;
-    }
-
-    final timetable = _currentTimetable;
-    final firestore = FirebaseFirestore.instance;
-
-    try {
-      if (value) {
-        final postId = firestore.collection('board_posts').doc().id;
-        final post = PostModel(
-          id: postId,
-          title: '${timetable.name} 시간표 공유',
-          content: _buildShareContent(timetable.classes),
-          authorId: user.uid,
-          authorName: user.name,
-          authorNickname: user.nickname,
-          authorProfileImageUrl: user.profileImageUrl,
-          createdAt: DateTime.now(),
-          category: '시간표 공유',
-          timetableClasses: timetable.classes.map((c) => c.toMap()).toList(),
-        );
-        await firestore.collection('board_posts').doc(postId).set(post.toMap());
-        setState(() {
-          timetable.isShared = true;
-          timetable.sharedPostId = postId;
-        });
-      } else {
-        final postId = timetable.sharedPostId;
-        if (postId != null) {
-          try {
-            await firestore.collection('board_posts').doc(postId).delete();
-          } catch (_) {
-            // 게시판에서 이미 지워진 글이면(예: 사용자가 게시판에서 직접 삭제) 문서가
-            // 없어 보안 규칙상 permission-denied가 난다. 목표(공유 해제)는 이미
-            // 달성된 상태이므로 무시하고 로컬 상태만 정리한다.
-          }
-        }
-        setState(() {
-          timetable.isShared = false;
-          timetable.sharedPostId = null;
-        });
-      }
-      await _saveData();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('공유 설정 중 오류가 발생했습니다: $e')),
-      );
-    }
-  }
-
-  /// 공유 중인 시간표가 수정되면(수업 추가/수정/삭제) 게시판 글도 최신 내용으로 갱신한다.
-  Future<void> _syncSharedPostIfNeeded() async {
-    final timetable = _currentTimetable;
-    if (!timetable.isShared) return;
-    await _updateSharedPost(timetable);
-  }
-
-  /// timetable이 공유 중이면 연결된 게시판 글의 제목/내용을 최신 상태로 덮어쓴다.
-  /// 이름 변경, 수업 추가/수정/삭제 등 시간표가 바뀌는 모든 곳에서 공용으로 쓴다.
-  Future<void> _updateSharedPost(TimetableData timetable) async {
-    if (!timetable.isShared || timetable.sharedPostId == null) return;
-    try {
-      await FirebaseFirestore.instance
-          .collection('board_posts')
-          .doc(timetable.sharedPostId)
-          .update({
-        'title': '${timetable.name} 시간표 공유',
-        'content': _buildShareContent(timetable.classes),
-        'timetableClasses': timetable.classes.map((c) => c.toMap()).toList(),
-        'updatedAt': Timestamp.now(),
-      });
-    } catch (_) {
-      // 게시판에서 이미 지워진 글이면 갱신이 계속 실패하므로, 공유 해제 상태로
-      // 되돌려 체크박스가 실제 상태(공유 안 됨)를 보여주게 한다.
-      if (!mounted) return;
-      setState(() {
-        timetable.isShared = false;
-        timetable.sharedPostId = null;
-      });
-      await _saveData();
-    }
-  }
-
-  /// 시간표 이름 변경 다이얼로그. 공유 중이면 게시판 글 제목도 함께 갱신한다.
+  /// 시간표 이름 변경 다이얼로그.
   Future<void> _renameTimetable(TimetableData timetable, StateSetter setModalState) async {
     final controller = TextEditingController(text: timetable.name);
     final newName = await showDialog<String>(
@@ -323,35 +218,40 @@ class _TimetablePageState extends State<TimetablePage> {
     setState(() => timetable.name = newName);
     setModalState(() {});
     await _saveData();
-    await _updateSharedPost(timetable);
   }
 
   void _initializeData() {
+    // 예시 시간표는 참고용이라 알람(사전 알림)은 기본으로 꺼둔다.
     final defaultClasses = [
       ClassItem(
         id: '1', title: '알고리즘', room: '제1과학관 201호', dayIndex: 0,
         startHour: 10, startMinute: 0, durationMinutes: 120, color: const Color(0xFFFDE4E4),
+        reminderOffsets: {},
       ),
       ClassItem(
         id: '2', title: '컴퓨터구조', room: '인문사회관 304호', dayIndex: 1,
         startHour: 13, startMinute: 30, durationMinutes: 90, color: const Color(0xFFE4F1FD),
+        reminderOffsets: {},
       ),
       ClassItem(
         id: '3', title: '데이터베이스', room: '50주년기념관 402호', dayIndex: 2,
         startHour: 15, startMinute: 0, durationMinutes: 180, color: const Color(0xFFFDF4E4),
+        reminderOffsets: {},
       ),
       ClassItem(
         id: '4', title: '운영체제', room: '누리관 101호', dayIndex: 3,
         startHour: 11, startMinute: 0, durationMinutes: 90, color: const Color(0xFFE4FDE9),
+        reminderOffsets: {},
       ),
       ClassItem(
         id: '5', title: '졸업프로젝트', room: '제2과학관 303호', dayIndex: 4,
         startHour: 9, startMinute: 0, durationMinutes: 120, color: const Color(0xFFF3E4FD),
+        reminderOffsets: {},
       ),
     ];
 
     _timetables = [
-      TimetableData(id: '1', name: '2025년 1학기', classes: defaultClasses),
+      TimetableData(id: '1', name: '예시 시간표', classes: defaultClasses),
     ];
     _currentTimetableId = '1';
     _saveData(); // Save initial data
@@ -416,35 +316,7 @@ class _TimetablePageState extends State<TimetablePage> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
-        children: [
-          _buildShareRow(),
-          Expanded(child: _isGridView ? _buildGridView() : _buildListView()),
-        ],
-      ),
-    );
-  }
-
-  /// 게시판 공유 체크박스. 체크하면 이 시간표를 게시판(카테고리: 시간표 공유)에 올리고,
-  /// 해제하면 올렸던 글을 지운다.
-  Widget _buildShareRow() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.grey[200]!)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          const Text('게시판에 공유하기', style: TextStyle(fontSize: 13)),
-          Checkbox(
-            value: _currentTimetable.isShared,
-            activeColor: AppConstants.primaryColor,
-            onChanged: (v) => _toggleShare(v ?? false),
-          ),
-        ],
-      ),
+      body: _isGridView ? _buildGridView() : _buildListView(),
     );
   }
 
@@ -659,7 +531,6 @@ class _TimetablePageState extends State<TimetablePage> {
               _classes.removeWhere((c) => c.id == item.id);
             });
             _saveData();
-            _syncSharedPostIfNeeded();
           },
           child: GestureDetector(
             onTap: () => _showAddEditDialog(item: item),
@@ -775,11 +646,7 @@ class _TimetablePageState extends State<TimetablePage> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('시간표 삭제'),
-        content: Text(
-          timetable.isShared
-              ? '「${timetable.name}」을(를) 삭제하시겠습니까?\n게시판에 공유된 글도 함께 삭제됩니다.'
-              : '「${timetable.name}」을(를) 삭제하시겠습니까?',
-        ),
+        content: Text('「${timetable.name}」을(를) 삭제하시겠습니까?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('아니요')),
           TextButton(
@@ -792,19 +659,8 @@ class _TimetablePageState extends State<TimetablePage> {
     return confirmed ?? false;
   }
 
-  /// 확인을 마친 뒤 실제로 시간표를 지운다. 공유 중이던 시간표면 게시판 글도 함께 지운다.
+  /// 확인을 마친 뒤 실제로 시간표를 지운다.
   Future<void> _performDeleteTimetable(TimetableData timetable, StateSetter setModalState) async {
-    if (timetable.isShared && timetable.sharedPostId != null) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('board_posts')
-            .doc(timetable.sharedPostId)
-            .delete();
-      } catch (_) {
-        // 게시판에서 이미 지워진 글이면 무시한다.
-      }
-    }
-
     setState(() {
       _timetables.removeWhere((t) => t.id == timetable.id);
       if (_currentTimetableId == timetable.id) {
@@ -1313,7 +1169,6 @@ class _TimetablePageState extends State<TimetablePage> {
                               }
                             });
                             _saveData();
-                            _syncSharedPostIfNeeded();
                             Navigator.pop(context);
                           },
                           style: ElevatedButton.styleFrom(

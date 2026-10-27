@@ -82,7 +82,11 @@ class _AlarmScreenState extends State<AlarmScreen> {
     final (updated, error) = await _service.addOrUpdateAlarm(result);
     if (!mounted) return;
     setState(() => _alarms = updated);
-    if (error != null) _showScheduleFailedWarning(error);
+    if (error != null) {
+      _showScheduleFailedWarning(error);
+    } else if (result.enabled) {
+      _showTimeUntilAlarm(result);
+    }
   }
 
   Future<void> _delete(AlarmModel alarm) async {
@@ -95,7 +99,11 @@ class _AlarmScreenState extends State<AlarmScreen> {
     final (updated, error) = await _service.setEnabled(alarm.id, value);
     if (!mounted) return;
     setState(() => _alarms = updated);
-    if (error != null) _showScheduleFailedWarning(error);
+    if (error != null) {
+      _showScheduleFailedWarning(error);
+    } else if (value) {
+      _showTimeUntilAlarm(alarm.copyWith(enabled: true));
+    }
   }
 
   void _showScheduleFailedWarning(String error) {
@@ -103,6 +111,18 @@ class _AlarmScreenState extends State<AlarmScreen> {
       SnackBar(
         content: Text('알람 예약에 실패했습니다: $error'),
         backgroundColor: Colors.red,
+      ),
+    );
+  }
+
+  void _showTimeUntilAlarm(AlarmModel alarm) {
+    final isEnglish = Provider.of<LocaleProvider>(context, listen: false).isEnglish;
+    final target = nextAlarmOccurrence(alarm.hour, alarm.minute, alarm.repeatDays);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(formatTimeUntilAlarm(target, isEnglish)),
+        backgroundColor: const Color(0xFF5B5FEF),
+        duration: const Duration(seconds: 3),
       ),
     );
   }
@@ -791,7 +811,7 @@ class _AlarmEditSheetState extends State<_AlarmEditSheet> {
             const Divider(height: 24),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
-              title: Text(isEnglish ? 'Turn off with QR code' : 'QR 코드로 끄기'),
+              title: Text(isEnglish ? 'Turn off with QR code' : 'QR 코드로 끄기(미션알람)'),
               subtitle: Text(
                 isEnglish
                     ? 'The alarm can only be stopped by scanning the registered QR code.'

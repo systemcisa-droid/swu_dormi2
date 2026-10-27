@@ -7,7 +7,6 @@ const List<Map<String, dynamic>> kBoardCategories = [
   {'value': '세탁실톡',    'label': '세탁실톡',    'color': Colors.purple},
   {'value': '배달팟',   'label': '배달팟',   'color': Colors.red},
   {'value': '맛집',        'label': '맛집',        'color': Colors.teal},
-  {'value': '시간표 공유', 'label': '시간표 공유', 'color': Colors.indigo},
 ];
 
 Color boardCategoryColor(String category) {

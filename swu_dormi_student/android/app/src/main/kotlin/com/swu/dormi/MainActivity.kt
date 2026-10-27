@@ -9,6 +9,8 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -25,8 +27,13 @@ class MainActivity : FlutterActivity() {
     private var pendingRingtoneResult: MethodChannel.Result? = null
     private var systemRingtonePlayer: MediaPlayer? = null
 
+    private var ringWakeLock: PowerManager.WakeLock? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (intent?.action == ACTION_ALARM_RING) {
+            wakeScreenForRing()
+        }
         consumeRingIntent(intent)
     }
 
@@ -34,6 +41,7 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.action == ACTION_ALARM_RING) {
+            wakeScreenForRing()
             val alarmId = intent.getIntExtra(EXTRA_ALARM_ID, -1)
             val snoozeCount = intent.getIntExtra(EXTRA_SNOOZE_COUNT, 0)
             val weekday = intent.getIntExtra(EXTRA_WEEKDAY, 0)
@@ -56,6 +64,38 @@ class MainActivity : FlutterActivity() {
             pendingAlarmId = if (alarmId != -1) alarmId else null
             pendingSnoozeCount = intent.getIntExtra(EXTRA_SNOOZE_COUNT, 0)
             pendingWeekday = intent.getIntExtra(EXTRA_WEEKDAY, 0)
+        }
+    }
+
+    /// 매니페스트의 showWhenLocked/turnScreenOn만으로는 일부 기기(특히 제조사
+    /// 커스텀 ROM)에서 화면이 꺼진 상태일 때 믿을 수 없이 동작한다. 그래서
+    /// 창(window) 플래그를 직접 켜고, Flutter 엔진이 뜨는 동안 기기가 다시
+    /// 잠들지 않도록 잠깐 WakeLock도 잡아 둔다.
+    private fun wakeScreenForRing() {
+        try {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+            )
+        } catch (e: Exception) {
+        }
+
+        try {
+            ringWakeLock?.let { if (it.isHeld) it.release() }
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            val wakeLock = powerManager.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+                "$CHANNEL_NAME:ring",
+            )
+            wakeLock.acquire(20_000L)
+            ringWakeLock = wakeLock
+        } catch (e: Exception) {
         }
     }
 
@@ -218,6 +258,11 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         stopSystemRingtoneLoop()
+        try {
+            ringWakeLock?.let { if (it.isHeld) it.release() }
+        } catch (e: Exception) {
+        }
+        ringWakeLock = null
         super.onDestroy()
     }
 
