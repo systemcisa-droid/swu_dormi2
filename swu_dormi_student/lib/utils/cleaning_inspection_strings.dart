@@ -141,6 +141,7 @@ class CleaningInspectionStrings {
   String get adminOnlySchedule => _t('직접 신청할 수 없는 일정입니다. 층장에게 문의해주세요',
       'This schedule cannot be applied for directly. Please contact your floor captain');
   String get alreadyPending => _t('이미 대기 중인 신청이 있습니다', 'You already have a pending request');
+  String get roomAlreadyPending => _t('같은 호실의 다른 학생이 이미 점검대기중입니다', 'Another student in your room already has a pending inspection request');
   String get monthlyLimitReached =>
       _t('월검사는 한 달에 한 번만 신청할 수 있습니다', 'You can only apply for the monthly inspection once per month');
   String get requestSubmitted => _t('청소점검 신청이 완료되었습니다', 'Your cleaning inspection request has been submitted');

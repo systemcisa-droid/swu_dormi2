@@ -1455,6 +1455,28 @@ class _CleaningInspectionScreenState extends State<CleaningInspectionScreen> {
         return;
       }
 
+      // 월검사는 같은 호실에 이미 점검대기중/점검중인 신청이 있으면
+      // 다른 학생(룸메이트)이 중복으로 신청할 수 없다.
+      if (scheduleInspectionType == 'monthly') {
+        final roomPending = await _firestore
+            .collection('cleaning_requests')
+            .where('roomNumber', isEqualTo: user.roomNumber)
+            .where('dormBuilding', isEqualTo: user.dormBuilding)
+            .where('inspectionType', isEqualTo: 'monthly')
+            .where('status', whereIn: ['pending', 'in_progress'])
+            .get();
+        final roomBlockedByOther = roomPending.docs
+            .any((d) => d.data()['userId'] != user.uid);
+        if (roomBlockedByOther) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(strs.roomAlreadyPending), backgroundColor: Colors.orange),
+            );
+          }
+          return;
+        }
+      }
+
       // 월검사는 한 달에 한 번만 신청 가능 (재검사 신청은 예외)
       if (scheduleInspectionType == 'monthly') {
         final newDateVal = scheduleData['date'];

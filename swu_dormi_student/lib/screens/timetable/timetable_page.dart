@@ -563,12 +563,27 @@ class _TimetablePageState extends State<TimetablePage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          item.title,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                item.title,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (item.reminderOffsets.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              const Icon(
+                                Icons.alarm,
+                                size: 14,
+                                color: Colors.red,
+                              ),
+                            ],
+                          ],
                         ),
                         const SizedBox(height: 4),
                         Text(
