@@ -236,6 +236,7 @@ class _ReservationScreenState extends State<ReservationScreen> {
           .get();
       for (final doc in recheckSnap.docs) {
         final data = doc.data();
+        if (data['cancelled'] == true) continue;
         final start = (data['startSlot'] as num?)?.toInt() ?? 0;
         final end = (data['endSlot'] as num?)?.toInt() ?? start;
         if (_rangeStart! <= end && _rangeEnd! >= start) {
